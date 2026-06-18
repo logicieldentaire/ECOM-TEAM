@@ -2004,7 +2004,7 @@ function openUserModal(uid=null){
   const isEdit=uid!==null;
   const x=isEdit?APP.users[uid]:null;
   const ves=Object.values(APP.users).filter(v=>v.role==='video_editor');
-  const allPerms=['dashboard','tasks','products','team','reports','pointage'];
+  const allPerms=['dashboard','tasks','products','team','reports','pointage','testproducts','stats','history'];
   document.getElementById('md2').innerHTML=`
   <div class="mh"><div><div class="mt">${isEdit?'Edit user — '+x.name:'Add user'}</div><div class="ms">${isEdit?x.email:'Create a new account'}</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
   <div class="mb">
@@ -2025,12 +2025,29 @@ function openUserModal(uid=null){
     </div>
     <div class="divider"></div>
     <div class="sec-t">Access permissions</div>
-    ${allPerms.map(perm=>{const on=isEdit?(x.perms?.[perm]?1:0):(['dashboard','tasks','products'].includes(perm)?1:0);return `<div class="prow"><div><div style="font-size:13px;font-weight:600;text-transform:capitalize">${perm}</div><div style="font-size:11px;color:var(--muted)">${{dashboard:'View dashboard & KPIs',tasks:'Access tasks',products:'View products',team:'Manage users & assignments',reports:'Daily spend reports',pointage:'Upload tracking'}[perm]}</div></div><button class="tog ${on?'on':''}" id="perm_${perm}" onclick="this.classList.toggle('on')" type="button"></button></div>`;}).join('')}
+    ${allPerms.map(perm=>{
+      const permLabels={dashboard:'View dashboard & KPIs',tasks:'Access tasks',products:'View & manage products',team:'Manage users & assignments',reports:'Daily spend reports',pointage:'Upload tracking',testproducts:'Products to test',stats:'Statistics',history:'Audit history'};
+      const defaultOn = {video_editor:['dashboard','tasks','products','testproducts'], media_buyer:['dashboard','tasks','products','reports','testproducts'], product_lister:['products','testproducts'], admin:allPerms};
+      const role = isEdit ? x.role : 'video_editor';
+      const on = isEdit ? (x.perms?.[perm]?1:0) : (defaultOn[role]||['products']).includes(perm)?1:0;
+      return `<div class="prow"><div><div style="font-size:13px;font-weight:600;text-transform:capitalize">${perm.replace('_',' ')}</div><div style="font-size:11px;color:var(--muted)">${permLabels[perm]||perm}</div></div><button class="tog ${on?'on':''}" id="perm_${perm}" onclick="this.classList.toggle('on')" type="button"></button></div>`;
+    }).join('')}
   </div>
   <div class="mf">${isEdit&&uid!=='youssef'?`<button class="btn btn-bad btn-sm" onclick="delUser('${uid}');closeM2()">Delete</button>`:''}<button class="btn btn-out" onclick="closeM2()">Cancel</button><button class="btn btn-pri" onclick="saveUser(${isEdit?`'${uid}'`:'null'})">${isEdit?'Save':'Create'}</button></div>`;
   openM2();
 }
-function userRoleChange(){ const r=document.getElementById('u_role').value; document.getElementById('u_mbExtra').style.display=r==='media_buyer'?'block':'none'; }
+function userRoleChange(){
+  const r=document.getElementById('u_role').value;
+  document.getElementById('u_mbExtra').style.display=r==='media_buyer'?'block':'none';
+  // Auto-set default permissions for the chosen role
+  const allPerms=['dashboard','tasks','products','team','reports','pointage','testproducts','stats','history'];
+  const defaults={video_editor:['dashboard','tasks','products','testproducts'], media_buyer:['dashboard','tasks','products','reports','testproducts'], product_lister:['products','testproducts'], admin:allPerms};
+  const on = defaults[r]||['products'];
+  allPerms.forEach(p=>{
+    const el=document.getElementById('perm_'+p);
+    if(el){ if(on.includes(p)) el.classList.add('on'); else el.classList.remove('on'); }
+  });
+}
 async function saveUser(uid){
   const allPerms=['dashboard','tasks','products','team','reports','pointage','testproducts','stats','history'];
   const name=document.getElementById('u_name').value.trim();
