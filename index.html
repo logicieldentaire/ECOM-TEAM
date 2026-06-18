@@ -6,6 +6,7 @@
 <title>EcomTeamAfrica — Operations</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 /* ════════ PROFESSIONAL DESIGN SYSTEM ════════
    ONE accent (blue). Slate neutrals. Semantic colors used sparingly. */
@@ -283,8 +284,79 @@ tbody tr.clickable:hover td { background: var(--s50); }
 <div class="app" id="app" style="display:none"></div>
 <div class="mo" id="mo1"><div class="modal" id="md1"></div></div>
 <div class="mo" id="mo2"><div class="modal wide" id="md2"></div></div>
+<div id="loadingOverlay" style="position:fixed;inset:0;background:#0F172A;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999;gap:16px">
+  <div style="width:42px;height:42px;border-radius:10px;background:#2563EB;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#fff">ET</div>
+  <div style="color:#fff;font-family:Inter,sans-serif;font-size:14px;font-weight:600">Loading EcomTeamAfrica…</div>
+  <div style="width:180px;height:3px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden">
+    <div id="loadBar" style="height:100%;width:0%;background:#2563EB;border-radius:2px;transition:width .4s"></div>
+  </div>
+  <div id="loadMsg" style="color:#64748B;font-family:Inter,sans-serif;font-size:12px">Connecting to database…</div>
+</div>
 
 <script>
+// ══════════════════════════════════════════════════════════
+// SUPABASE CLIENT
+// ══════════════════════════════════════════════════════════
+const SUPABASE_URL = 'https://dpsbjmxdcbsbcwkwpfzu.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRwc2JqbXhkY2JzYmN3a3dwZnp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE4MDc3NDMsImV4cCI6MjA5NzM4Mzc0M30.wtFATJbK2V2AjxJJFcKciLAMBlqhvffyoz116ZOpRRc';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ─── Loader helpers ───
+function setLoad(pct, msg){ document.getElementById('loadBar').style.width=pct+'%'; document.getElementById('loadMsg').textContent=msg; }
+function hideLoader(){ document.getElementById('loadingOverlay').style.display='none'; }
+
+// ─── Row → APP format converters ───
+function rowToUser(r){ return { id:r.id, name:r.name, role:r.role, av:r.av, email:r.email, pwd:r.pwd, products:r.products||[], ve:r.ve||null, active:r.active, perms:r.perms||{} }; }
+function rowToProduct(r){ return { id:r.id, name:r.name, market:r.market, lang:r.lang, cat:r.cat, url:r.url, images:r.images||[], angles:r.angles||[], hooks:r.hooks||[], rawVideo:r.raw_video||'' }; }
+function rowToTestProduct(r){ return { id:r.id, name:r.name, url:r.url, market:r.market, lang:r.lang, notes:r.notes||'', assignedMBs:r.assigned_mbs||[], status:r.status||'testing', testResults:r.test_results||[], createdAt:r.created_at }; }
+function rowToTask(r){ return { id:r.id, productId:r.product_id, testProductId:r.test_product_id, taskDate:r.task_date, day:r.day, assignedMB:r.assigned_mb, assignedVE:r.assigned_ve, campaignType:r.campaign_type, videoType:r.video_type, voiceOver:r.voice_over, angle:r.angle, variants:r.variants||[], status:r.status, revisionNote:r.revision_note||'', mbNote:r.mb_note||'', managerApproval:r.manager_approval||'pending', deadlineDate:r.deadline_date, isTest:r.is_test||false, testProductName:r.test_product_name||'', testMarket:r.test_market||'', createdAt:r.created_at, updatedAt:r.updated_at }; }
+function rowToReport(r){ return { id:r.id, mbId:r.mb_id, productId:r.product_id, date:r.date, spend:r.spend, leads:r.leads, cpl:r.cpl }; }
+function rowToHistory(r){ return { id:r.id, action:r.action, entity:r.entity, entityId:r.entity_id, description:r.description, byUser:r.by_user, byName:r.by_name, at:r.created_at }; }
+
+// ─── APP → DB format converters ───
+function taskToRow(t){ return { product_id:t.productId||null, test_product_id:t.testProductId||null, task_date:t.taskDate, day:t.day, assigned_mb:t.assignedMB, assigned_ve:t.assignedVE, campaign_type:t.campaignType, video_type:t.videoType, voice_over:t.voiceOver, angle:t.angle, variants:t.variants||[], status:t.status, revision_note:t.revisionNote||'', mb_note:t.mbNote||'', manager_approval:t.managerApproval||'pending', deadline_date:t.deadlineDate||null, is_test:t.isTest||false, test_product_name:t.testProductName||'', test_market:t.testMarket||'' }; }
+function reportToRow(r){ return { mb_id:r.mbId, product_id:r.productId, date:r.date, spend:r.spend, leads:r.leads, cpl:r.cpl }; }
+
+// ══════════════════════════════════════════════════════════
+// INITIAL DATA LOAD FROM SUPABASE
+// ══════════════════════════════════════════════════════════
+async function loadAllData(){
+  setLoad(10,'Loading users…');
+  const { data: usersData, error: ue } = await sb.from('users').select('*').order('id');
+  if(ue){ 
+    console.error('users load failed — code:', ue.code, '— message:', ue.message, '— details:', ue.details, '— hint:', ue.hint);
+    document.getElementById('loadMsg').textContent = 'DB Error: ' + (ue.message||ue.code||JSON.stringify(ue));
+    document.getElementById('loadMsg').style.color = '#F87171';
+    return;
+  }
+  if(usersData){
+    APP.users = {};
+    usersData.forEach(r=>{ APP.users[r.id]=rowToUser(r); });
+  }
+
+  setLoad(30,'Loading products…');
+  const { data: prodsData } = await sb.from('products').select('*').order('id');
+  if(prodsData) APP.products = prodsData.map(rowToProduct);
+
+  setLoad(45,'Loading test products…');
+  const { data: tpData } = await sb.from('test_products').select('*').order('id');
+  if(tpData) APP.testProducts = tpData.map(rowToTestProduct);
+
+  setLoad(60,'Loading tasks…');
+  const { data: tasksData } = await sb.from('tasks').select('*').order('id');
+  if(tasksData){ APP.tasks = tasksData.map(rowToTask); APP.taskSeq = (Math.max(0,...APP.tasks.map(t=>t.id))||0)+1; }
+
+  setLoad(75,'Loading reports…');
+  const { data: repsData } = await sb.from('reports').select('*').order('id');
+  if(repsData){ APP.reports = repsData.map(rowToReport); APP.reportSeq = (Math.max(0,...APP.reports.map(r=>r.id))||0)+1; }
+
+  setLoad(90,'Loading history…');
+  const { data: histData } = await sb.from('history').select('*').order('created_at',{ascending:false}).limit(500);
+  if(histData) APP.history = histData.map(rowToHistory);
+
+  setLoad(100,'Ready');
+}
+
 // ══════════════════════════════════════════════════════════
 // CONFIG
 // ══════════════════════════════════════════════════════════
@@ -336,131 +408,29 @@ let APP = {
   authed: false, me: null,
   page: 'dashboard', week: 1, tab: 'all', collapsed: false,
   dashUser: null,
-  dashDateFilter: '',   // date filter for VE deadline view in admin dash
+  dashDateFilter: '',
   selTask: null,
   reportFilter: '',
-
-  testProducts: [],     // products added for testing (not yet in main catalog)
+  testProducts: [],
   testProductSeq: 1,
-  history: [],           // audit log of create/update/delete actions
+  history: [],
   historySeq: 1,
   pointageFilter: '',
   statsFilter: { from: '', to: '', kpis: ['videos','revisions','winners','dlrespect','cpl','leads','spend'] },
-  veDashFilter: { mode: 'week', from: '', to: '' },   // mode: 'today' | 'week' | 'custom'
+  veDashFilter: { mode: 'week', from: '', to: '' },
   mbDashFilter: { mode: 'week', from: '', to: '' },
-  tasksFilter:  { mode: 'week', offset: 0, from: '', to: '' }, // mode: 'today' | 'week' | 'custom'; offset: weeks from current
+  tasksFilter:  { mode: 'week', offset: 0, from: '', to: '' },
 
-  users: {
-    youssef:{id:'youssef',name:'Youssef',role:'admin',av:'YO',email:'youssef@ecomteam.africa',pwd:'admin2024',products:[],ve:null,active:true,perms:{dashboard:1,tasks:1,products:1,team:1,reports:1,pointage:1,testproducts:1}},
-    omar:   {id:'omar',   name:'Omar',   role:'video_editor',av:'OM',email:'omar@ecomteam.africa',pwd:'omar2024',products:[],ve:null,active:true,perms:{dashboard:1,tasks:1,products:1,testproducts:1}},
-    nadia:  {id:'nadia', name:'Nadia',  role:'video_editor',av:'NA',email:'nadia@ecomteam.africa',pwd:'nadia2024',products:[],ve:null,active:true,perms:{dashboard:1,tasks:1,products:1,testproducts:1}},
-    mohsin: {id:'mohsin',name:'Mohsin', role:'media_buyer',av:'MO',email:'mohsin@ecomteam.africa',pwd:'mohsin2024',products:[1,2,3,4],ve:'omar',active:true,perms:{dashboard:1,tasks:1,products:1,reports:1,testproducts:1}},
-    faheem: {id:'faheem',name:'Faheem', role:'media_buyer',av:'FA',email:'faheem@ecomteam.africa',pwd:'faheem2024',products:[5,6,7,8],ve:'nadia',active:true,perms:{dashboard:1,tasks:1,products:1,reports:1,testproducts:1}},
-  },
-
-  products: [
-    {id:1,name:'SealFix Pro™',market:'KENYA',lang:'English',cat:'Home Repair',url:'harakastore.shop/products/sealfix-pro',images:[],rawVideo:'',
-     angles:['Fix leaking taps ONCE — never call a plumber again','Stop water damage before it destroys your walls','Waterproof seal that survives Kenya\'s rainy season','Professional-grade bond any handyman can apply','Save KES 5,000+ in plumber fees with one tube','Works on tiles, metal, glass, PVC','Dries in 30 minutes','Mold-resistant — perfect for Kenyan humidity','One tube seals kitchen, bathroom AND outdoor','The #1 DIY solution for Kenyan homeowners'],
-     hooks:['Your plumber doesn\'t want you to know about this','Leaking pipe at 2AM? Fixed in 10 minutes','Stop spending money on plumbers','This seal outlasted 3 rainy seasons in Nairobi','My landlord saved KES 8,000 using this','One tube = bathroom + kitchen + outdoor done','If your house has ever leaked, watch this','Plumbers HATE how easy this is','I sealed my entire bathroom for KES 800','Waterproof in 30 minutes — even in the rain']},
-    {id:2,name:'SliceMaster™ 5-in-1',market:'KENYA',lang:'English',cat:'Kitchen',url:'harakastore.shop/products/slicemate',images:[],rawVideo:'',
-     angles:['5 cutting styles in one','No more cut fingers — safety guard','Cut meal prep from 30 min to 5','Perfect uniform slices every time','Professional chef results at home','Easy to clean — rinse and go','Compact — fits in any drawer','Kids can help safely','Save money on pre-cut vegetables','Every Kenyan mama needs this'],
-     hooks:['I sliced onions without crying for the first time','5 tools in 1 — costs less than a matatu ride','Cut chips in 30 seconds flat','How hotels cut vegetables so perfectly','I saved 25 minutes of prep every day','The safest way to slice','Kids wanted to help cook — now they can','From whole onion to rings in 10 seconds','One gadget replaced 5 tools','Food like a 5-star restaurant']},
-    {id:3,name:'PneuAlert™ Tire ×4',market:'KENYA',lang:'English',cat:'Auto Safety',url:'harakastore.shop/products/pneualert',images:[],rawVideo:'',
-     angles:['See tire pressure at a glance','Prevent blowouts on Kenyan highways','Save 10-15% on fuel','4 caps — full car in seconds','Green=OK, Red=Low','Works on cars, boda bodas, matatus','No batteries, no app','Detect slow leaks early','Essential Nairobi-Mombasa','The KES 500 upgrade that saves tires'],
-     hooks:['This cap tells if your tire is safe just by looking','Green means go, red means STOP','My tire blew on Thika — never again','4 caps, 4 tires, zero guesswork','Low pressure costs fuel EVERY day','Cheapest car safety upgrade','Mechanics don\'t want you to have this','Tested on Kenyan roads','Detect a leak 2 days early','Every car in Kenya needs this']},
-    {id:4,name:'GreenWall Ivy™',market:'KENYA',lang:'English',cat:'Home Decor',url:'imarahub.co.ke/products/greenwall-ivy',images:[],rawVideo:'',
-     angles:['Instant green wall, zero maintenance','Transform any bare wall','UV-resistant — won\'t fade','Fireproof certified','Panels interlock — any size','Perfect for offices, Airbnb','No soil, water, or light','Looks like real ivy','Cover ugly walls and concrete','Interior upgrade pros choose'],
-     hooks:['My office wall is now a green garden','Airbnb host doubled bookings after this','Guests ask if it\'s real','Install in 30 minutes','Restaurant tripled social shares','Most photogenic wall in Nairobi','Stays green forever in the sun','Cover that ugly cracked wall','100% fireproof certified','Zero watering — pure green forever']},
-    {id:5,name:'PneuAlert™ Congo',market:'CONGO KINSHASA',lang:'French',cat:'Auto Sécurité',url:'storinio.shop/products/pneualert',images:[],rawVideo:'',
-     angles:['Voir la pression sans appareil','Prévenir les éclatements à Kinshasa','Économiser 15% de carburant','4 bouchons — sécurité en secondes','Vert=OK, Rouge=DANGER','Sans pile ni appli','Détecter les crevaisons lentes','Essentiel Kinshasa-Lubumbashi','Voiture, moto, taxi, camion','Investissement unique'],
-     hooks:['Ce bouchon dit si votre pneu est dangereux','Vert c\'est bon, rouge c\'est STOP','Le mécanicien prend 500FC — ça GRATIS','Route Kinshasa-Mbuji-Mayi? OBLIGATOIRE','Mon pneu a explosé — plus jamais','4 bouchons, 4 roues, zéro devinette','Les chauffeurs de Gombe l\'utilisent','Coûte du carburant chaque jour','La sécurité la moins chère','Se rembourse au premier plein']},
-    {id:6,name:'VoltBeam™',market:'CONGO KINSHASA',lang:'French',cat:'Éclairage',url:'storinio.shop/products/voltbeam',images:[],rawVideo:'',
-     angles:['Éclaire 500m','Batterie rechargeable 12 heures','Résistant à l\'eau','5 modes d\'éclairage','Plus puissante qu\'une torche normale','1 acheté 1 offert','Idéale pour coupures SNEL','LED dure 10 ans','Rechargeable USB','Chaque foyer congolais devrait l\'avoir'],
-     hooks:['SNEL coupe encore? Tu restes éclairé','500m de portée','12 heures — toute une nuit','1 acheté = 1 OFFERT','Mes enfants étudient pendant les coupures','Recharge USB','LED dure 10 ans','Brillante comme un phare','Waterproof sous la pluie','Camping? Indispensable']},
-    {id:7,name:'Majimzunguko™ 360°',market:'TANZANIA',lang:'Swahili',cat:'Agriculture',url:'furahadeals.com/products/majimzunguko',images:[],rawVideo:'',
-     angles:['360° irrigation without touching','Save 3 hours of watering daily','Small garden to 1-acre farm','Connects to any hose','Works with low water pressure','Even coverage — no dry spots','Grass, vegetables, trees','Durable ABS','Set it and walk away','Home garden to large farm'],
-     hooks:['I water my whole garden in 10 min without touching it','360 degrees — no dry spots ever','Set timer, go to work, come back watered','Works with low pressure — perfect for Tanzania','Reduced my water bill by 40%','Healthiest vegetables ever','The secret farmers keep','7 watering patterns','My neighbor thought I hired a gardener','2m to 15m radius — any space']},
-    {id:8,name:'ChargeMax™ 120W',market:'CONGO KINSHASA',lang:'French',cat:'Auto Électronique',url:'storinio.shop/products/chargemax',images:[],rawVideo:'',
-     angles:['4 appareils en même temps','120W — charge rapide','iPhone, Samsung, Tecno, Infinix','LED indicateur','Compact','Protection surtension','Parfait pour les trajets','Plus rapide qu\'une prise murale','Famille connectée','Accessoire indispensable'],
-     hooks:['4 téléphones chargés en même temps — enfin','Trajet avec 4 enfants — batteries pleines','120W plus rapide que ta prise murale','Je charge iPhone, Samsung, tablettes','Fini les disputes de charge','Tecno, Infinix, Samsung — tous','4 ports, 1 allume-cigare','Chauffeur? Clients connectés','Protection surtension','COD — teste sans risque']},
-  ],
-
+  // Loaded from Supabase at startup:
+  users: {},
+  products: [],
   tasks: [],
   taskSeq: 1,
   reports: [],
   reportSeq: 1,
+  historyFilter: { action:'', entity:'', from:'', to:'' },
+  tpFilter: { from:'', to:'' },
 };
-
-// ─── Seed tasks ───
-(function seed(){
-  const st = ['pending','in_progress','done','in_revision','done','done','pending','in_progress'];
-  const rs = ['pending','pending','winner','loser','winner','pending','winner','pending'];
-  const today = new Date();
-  for(let weekOffset=-1; weekOffset<=1; weekOffset++){
-    APP.products.forEach((p,pi)=>{
-      const mb = pi<4 ? 'mohsin':'faheem';
-      const ve = APP.users[mb].ve;
-      DAYS.forEach((d,di)=>{
-        const baseMonday = new Date(today);
-        const dow = baseMonday.getDay()||7;
-        baseMonday.setDate(baseMonday.getDate()-dow+1+weekOffset*7);
-        const taskDate = new Date(baseMonday);
-        taskDate.setDate(baseMonday.getDate()+di);
-        const ymd = toYMD(taskDate);
-        const si = (pi+di)%8;
-        const status = st[si];
-        const isDone = status==='done'||status==='in_revision';
-        const numHooks = 1 + ((pi+di)%4); // vary 1–4 hooks per task for demo realism
-
-        // Build variants: same angle, different hooks, each with its own video/result/feedback
-        const variants = [];
-        for(let v=0; v<numHooks; v++){
-          let uploadedAt = null;
-          if(isDone){
-            const offsetHours = (si%3===0)?8:(si%3===1)?26:-3;
-            uploadedAt = new Date(taskDate.getTime()+18*3600000+offsetHours*3600000+v*1800000).toISOString();
-          }
-          variants.push({
-            hook: p.hooks[(pi+di+v)%p.hooks.length],
-            videoLink: isDone?'https://drive.google.com/file/d/demo-'+(pi*10+di)+'-v'+v:'',
-            mbResult: v===0?rs[si]:'pending',
-            mbFeedback: (v===0&&si===3)?'Hook timing off — reveal before 0:20.':'',
-            uploadedAt,
-          });
-        }
-
-        APP.tasks.push({
-          id:APP.taskSeq++, productId:p.id,
-          taskDate: ymd, day: d,
-          assignedMB:mb, assignedVE:ve,
-          campaignType: di===0?'TESTING':'SCALING',
-          videoType: VIDEO_TYPES[(pi+di)%VIDEO_TYPES.length],
-          voiceOver: p.lang==='French'?'French African Accent':p.lang==='Swahili'?'Kenyan Swahili':'English Kenyan Accent',
-          angle: p.angles[(pi+di)%p.angles.length],
-          variants,
-          status,
-          revisionNote: si===3?'Show the product in the first 3 seconds.':'',
-          managerApproval: si===4?'approved':'pending',
-          deadlineDate: taskDate.toISOString(),
-          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-        });
-      });
-    });
-  }
-})();
-
-// ─── Seed some reports ───
-(function seedReports(){
-  const today = new Date();
-  for (let d=0; d<8; d++) {
-    const date = new Date(today.getTime() - d*86400000).toISOString().slice(0,10);
-    [['mohsin',1],['mohsin',2],['faheem',5],['faheem',6]].forEach(([mb,pid],i)=>{
-      const spend = 8 + Math.round(Math.random()*22);
-      const leads = 3 + Math.round(Math.random()*14);
-      APP.reports.push({id:APP.reportSeq++, mbId:mb, productId:pid, date, spend, leads, cpl: +(spend/leads).toFixed(2)});
-    });
-  }
-})();
 
 // ══════════════════════════════════════════════════════════
 // HELPERS
@@ -484,22 +454,26 @@ function wkT(){
 function dayT(ymd){ return myTasks().filter(t=>t.taskDate===ymd); }
 // Yesterday's date
 function yesterdayYMD(){ return daysAgo(1); }
-function updTask(id,patch){ APP.tasks=APP.tasks.map(t=>t.id===id?{...t,...patch,updatedAt:new Date().toISOString()}:t); if(APP.selTask?.id===id) APP.selTask={...APP.selTask,...patch}; }
+async function updTask(id,patch){
+  APP.tasks=APP.tasks.map(t=>t.id===id?{...t,...patch,updatedAt:new Date().toISOString()}:t);
+  if(APP.selTask?.id===id) APP.selTask={...APP.selTask,...patch};
+  // Build DB row from patched task
+  const t=APP.tasks.find(x=>x.id===id);
+  if(t){
+    const row=taskToRow(t);
+    await sb.from('tasks').update(row).eq('id',id);
+  }
+}
 
 // ─── Audit log ───
-function logHistory(action, entity, entityId, description){
+async function logHistory(action, entity, entityId, description){
   const me = APP.me ? APP.users[APP.me] : null;
-  APP.history.unshift({
-    id: APP.historySeq++,
-    action,           // 'created' | 'updated' | 'deleted'
-    entity,           // 'task' | 'product' | 'testproduct' | 'user' | 'report'
-    entityId,
-    description,
-    byUser: me?me.id:'system',
-    byName: me?me.name:'System',
-    at: new Date().toISOString(),
-  });
-  if(APP.history.length>500) APP.history.length=500; // cap log size
+  const entry = { action, entity, entity_id:String(entityId), description, by_user:me?me.id:null, by_name:me?me.name:'System' };
+  const { data } = await sb.from('history').insert([entry]).select().single();
+  if(data){
+    APP.history.unshift({ id:data.id, action, entity, entityId:String(entityId), description, byUser:me?.id||null, byName:me?.name||'System', at:data.created_at });
+    if(APP.history.length>500) APP.history.length=500;
+  }
 }
 function av(id,sz=28){ const x=APP.users[id]; if(!x)return ''; return `<div class="av" style="background:${col(id)};width:${sz}px;height:${sz}px;font-size:${Math.max(9,Math.round(sz*.34))}px;border-radius:${Math.round(sz*.25)}px">${x.av}</div>`; }
 function chip(t,c='n'){ return `<span class="chip chip-${c}">${t}</span>`; }
@@ -612,16 +586,21 @@ function renderAuth(err=''){
       ${err?`<div class="auth-err">${err}</div>`:''}
       <div class="auth-field"><label class="auth-label">Email</label><input class="auth-input" id="le" type="email" placeholder="you@ecomteam.africa"></div>
       <div class="auth-field"><label class="auth-label">Password</label><input class="auth-input" id="lp" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')login()"></div>
-      <button class="auth-btn" onclick="login()">Sign in</button>
+      <button class="auth-btn" id="loginBtn" onclick="login()">Sign in</button>
     </div>
   </div>`;
 }
-function login(){
+async function login(){
+  const btn=document.getElementById('loginBtn');
+  if(btn){ btn.textContent='Signing in…'; btn.disabled=true; }
   const e=document.getElementById('le').value.trim().toLowerCase();
   const p=document.getElementById('lp').value;
-  const f=Object.values(APP.users).find(x=>x.email===e&&x.pwd===p&&x.active);
-  if(!f){ renderAuth('Invalid email or password.'); return; }
-  APP.me=f.id; APP.authed=true; APP.dashUser=f.role==='admin'?'omar':null;
+  // Look up user in Supabase
+  const { data: users, error } = await sb.from('users').select('*').eq('email',e).eq('pwd',p).eq('active',true);
+  if(error||!users||users.length===0){ renderAuth('Invalid email or password.'); return; }
+  const f = users[0];
+  APP.me=f.id; APP.authed=true;
+  APP.dashUser=f.role==='admin'?(Object.values(APP.users).find(x=>x.role==='video_editor')?.id||null):null;
   document.getElementById('auth').style.display='none';
   document.getElementById('app').style.display='flex';
   render();
@@ -1240,7 +1219,7 @@ function toggleTpMB(mbId){
   document.getElementById('tp_mbs').value=JSON.stringify(cur);
 }
 
-function saveTestProduct(editId){
+async function saveTestProduct(editId){
   const name=document.getElementById('tp_name')?.value?.trim();
   const url=document.getElementById('tp_url')?.value?.trim();
   const market=document.getElementById('tp_market')?.value;
@@ -1250,13 +1229,15 @@ function saveTestProduct(editId){
   const status=document.getElementById('tp_status')?.value||'testing';
   if(!name||!url){ alert('Name and URL required.'); return; }
   if(editId==='null'||editId===null){
-    const id=APP.testProductSeq++;
-    APP.testProducts.push({id,name,url,market,lang,notes,assignedMBs,status,testResults:[],createdAt:new Date().toISOString()});
-    logHistory('created','testproduct',id,`Added test product "${name}" (${market}) — assigned to ${assignedMBs.map(id=>APP.users[id]?.name).join(', ')||'no one'}`);
+    const row={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,test_results:[]};
+    const { data } = await sb.from('test_products').insert([row]).select().single();
+    if(data) APP.testProducts.push(rowToTestProduct(data));
+    await logHistory('created','testproduct',data?.id||0,`Added test product "${name}" (${market}) — assigned to ${assignedMBs.map(id=>APP.users[id]?.name).join(', ')||'no one'}`);
   } else {
     const tp=APP.testProducts.find(p=>p.id===editId);
     if(tp){ tp.name=name;tp.url=url;tp.market=market;tp.lang=lang;tp.notes=notes;tp.assignedMBs=assignedMBs;tp.status=status; }
-    logHistory('updated','testproduct',editId,`Edited test product "${name}" — status: ${status}`);
+    await sb.from('test_products').update({name,url,market,lang,notes,assigned_mbs:assignedMBs,status}).eq('id',editId);
+    await logHistory('updated','testproduct',editId,`Edited test product "${name}" — status: ${status}`);
   }
   closeM2(); render();
 }
@@ -1291,7 +1272,7 @@ function calcTestCpl(){
   if(out) out.textContent=(s>0&&l>0)?'$'+(s/l).toFixed(2):'$—';
 }
 
-function saveTestResult(tpId){
+async function saveTestResult(tpId){
   const tp=APP.testProducts.find(p=>p.id===tpId);
   if(!tp)return;
   const date=document.getElementById('tr_date')?.value;
@@ -1301,6 +1282,7 @@ function saveTestResult(tpId){
   if(!date||!(spend>=0)||!(leads>0)){alert('Fill all required fields.');return;}
   if(!tp.testResults)tp.testResults=[];
   tp.testResults.push({date,spend,leads,cpl:+(spend/leads).toFixed(2),notes,mbId:APP.me});
+  await sb.from('test_products').update({test_results:tp.testResults}).eq('id',tpId);
   closeM1(); render();
 }
 
@@ -1709,31 +1691,29 @@ function renderTaskModalBody(){
   if(addBtnWrap) addBtnWrap.innerHTML=(canVE||isA)&&t.variants.length<4?`<button class="btn btn-ghost btn-sm" onclick="addVariant()" style="margin-bottom:8px">+ Add another hook variant (${t.variants.length}/4)</button>`:'';
 }
 
-function saveTask(id){
+async function saveTask(id){
   syncVariantsFromDOM();
   const t=tk(id);
   const st=document.getElementById('tst')?.value||t.status;
   const mbNote=document.getElementById('tmbn')?.value?.trim();
   const variants=APP.selTask.variants.map(v=>({...v}));
-  // Record upload time for any variant that now has a link but no uploadedAt yet
   if(st==='done'){
     variants.forEach(v=>{ if(v.videoLink&&v.videoLink.trim()&&!v.uploadedAt) v.uploadedAt=new Date().toISOString(); });
   }
-  // Record revision upload time for any variant that now has a revision link but no timestamp yet
   variants.forEach(v=>{ if(v.revisionLink&&v.revisionLink.trim()&&!v.revisionUploadedAt) v.revisionUploadedAt=new Date().toISOString(); });
   const patch={ status:st, variants };
   if(mbNote!==undefined) patch.mbNote=mbNote;
-  updTask(id, patch);
-  logHistory('updated', 'task', id, `Updated task for ${pr(t.productId)?.name||t.testProductName||'product'} — status: ${st}`);
+  await updTask(id, patch);
+  await logHistory('updated', 'task', id, `Updated task for ${pr(t.productId)?.name||t.testProductName||'product'} — status: ${st}`);
   closeM1(); render();
 }
-function sendRevision(id){
+async function sendRevision(id){
   const note=document.getElementById('trn')?.value?.trim();
   if(!note){ alert('Describe what needs to be revised.'); return; }
   syncVariantsFromDOM();
   const t=tk(id);
-  updTask(id,{status:'in_revision',revisionNote:note,variants:APP.selTask.variants.map(v=>({...v}))});
-  logHistory('updated','task',id,`Sent task back for revision — ${pr(t.productId)?.name||t.testProductName||'product'}`);
+  await updTask(id,{status:'in_revision',revisionNote:note,variants:APP.selTask.variants.map(v=>({...v}))});
+  await logHistory('updated','task',id,`Sent task back for revision — ${pr(t.productId)?.name||t.testProductName||'product'}`);
   closeM1(); render();
 }
 
@@ -1887,7 +1867,7 @@ function addTestHookField(){
 }
 function ctVE(id){ document.querySelectorAll('[id^="ve_"]').forEach(b=>b.classList.remove('on')); document.getElementById('ve_'+id)?.classList.add('on'); document.getElementById('c_ve').value=id; }
 
-function createTask(){
+async function createTask(){
   const me=u();
   const mbId=me.role==='admin'?document.getElementById('c_mb')?.value:APP.me;
   const veId=document.getElementById('c_ve')?.value;
@@ -1933,7 +1913,10 @@ function createTask(){
   }
 
   APP.tasks.push(taskObj);
-  logHistory('created','task',taskObj.id,`Assigned task: ${pr(taskObj.productId)?.name||taskObj.testProductName||'product'} — ${taskObj.variants.length} hook(s) — to ${APP.users[veId]?.name}`);
+  // Persist to Supabase
+  const { data: inserted } = await sb.from('tasks').insert([taskToRow(taskObj)]).select().single();
+  if(inserted){ taskObj.id=inserted.id; APP.tasks[APP.tasks.length-1].id=inserted.id; }
+  await logHistory('created','task',taskObj.id,`Assigned task: ${pr(taskObj.productId)?.name||taskObj.testProductName||'product'} — ${taskObj.variants.length} hook(s) — to ${APP.users[veId]?.name}`);
   closeM2(); render();
 }
 
@@ -1971,7 +1954,7 @@ function calcCpl(){
   const out=document.getElementById('cplOut');
   out.textContent = (s>0&&l>0)?'$'+(s/l).toFixed(2):'$—';
 }
-function saveReport(){
+async function saveReport(){
   const me=u();
   const rawPid=document.getElementById('r_prod').value;
   const isTest=rawPid.startsWith('t_');
@@ -1986,19 +1969,21 @@ function saveReport(){
     if(!tp)return;
     if(!tp.testResults)tp.testResults=[];
     tp.testResults.push({date,spend,leads,cpl:+(spend/leads).toFixed(2),notes:'',mbId:me.id});
-    logHistory('created','report',pid,`${me.name} logged test result for "${tp.name}" — $${spend} spend, ${leads} leads`);
+    await sb.from('test_products').update({test_results:tp.testResults}).eq('id',pid);
+    await logHistory('created','report',pid,`${me.name} logged test result for "${tp.name}" — $${spend} spend, ${leads} leads`);
   } else {
-    const rid=APP.reportSeq++;
-    APP.reports.push({id:rid,mbId:me.id,productId:pid,date,spend,leads,cpl:+(spend/leads).toFixed(2)});
-    logHistory('created','report',rid,`${me.name} logged report for "${pr(pid)?.name||'product'}" — $${spend} spend, ${leads} leads`);
+    const { data } = await sb.from('reports').insert([{mb_id:me.id,product_id:pid,date,spend,leads,cpl:+(spend/leads).toFixed(2)}]).select().single();
+    if(data) APP.reports.push({id:data.id,mbId:me.id,productId:pid,date,spend,leads,cpl:data.cpl});
+    await logHistory('created','report',data?.id||0,`${me.name} logged report for "${pr(pid)?.name||'product'}" — $${spend} spend, ${leads} leads`);
   }
   closeM1(); render();
 }
-function deleteReport(id){
+async function deleteReport(id){
   if(!confirm('Delete this report?'))return;
   const r=APP.reports.find(x=>x.id===id);
-  APP.reports=APP.reports.filter(r=>r.id!==id);
-  if(r) logHistory('deleted','report',id,`Deleted report for "${pr(r.productId)?.name||'product'}" dated ${r.date}`);
+  APP.reports=APP.reports.filter(x=>x.id!==id);
+  await sb.from('reports').delete().eq('id',id);
+  if(r) await logHistory('deleted','report',id,`Deleted report for "${pr(r.productId)?.name||'product'}" dated ${r.date}`);
   render();
 }
 
@@ -2036,48 +2021,56 @@ function openUserModal(uid=null){
   openM2();
 }
 function userRoleChange(){ const r=document.getElementById('u_role').value; document.getElementById('u_mbExtra').style.display=r==='media_buyer'?'block':'none'; }
-function saveUser(uid){
-  const allPerms=['dashboard','tasks','products','team','reports','pointage'];
+async function saveUser(uid){
+  const allPerms=['dashboard','tasks','products','team','reports','pointage','testproducts','stats','history'];
   const name=document.getElementById('u_name').value.trim();
   const email=document.getElementById('u_email').value.trim().toLowerCase();
   const pwd=document.getElementById('u_pwd').value;
   const role=document.getElementById('u_role').value;
   const ve=document.getElementById('u_ve')?.value||null;
-  const perms={}; allPerms.forEach(p=>perms[p]=document.getElementById('perm_'+p).classList.contains('on')?1:0);
+  const perms={}; allPerms.forEach(p=>{ const el=document.getElementById('perm_'+p); perms[p]=el&&el.classList.contains('on')?1:0; });
   if(!name||!email){ alert('Name and email required.'); return; }
   if(uid==='null'||uid===null){
     const id=document.getElementById('u_id').value.trim();
     if(!id){ alert('User ID required.'); return; }
     if(APP.users[id]){ alert('User ID already exists.'); return; }
     if(!pwd||pwd.length<6){ alert('Password must be at least 6 characters.'); return; }
-    APP.users[id]={id,name,role,av:name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),email,pwd,products:[],ve:role==='media_buyer'?ve:null,active:true,perms};
-    AV[id]='#'+Math.floor(Math.random()*8388607+4194304).toString(16); // subtle slate-ish identity color
-    logHistory('created','user',id,`Created user ${name} (${role.replace('_',' ')})`);
+    const av=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    const newUser={id,name,role,av,email,pwd,products:[],ve:role==='media_buyer'?(ve||null):null,active:true,perms};
+    await sb.from('users').insert([newUser]);
+    APP.users[id]=newUser;
+    AV[id]='#'+Math.floor(Math.random()*8388607+4194304).toString(16);
+    await logHistory('created','user',id,`Created user ${name} (${role.replace('_',' ')})`);
   } else {
     const x=APP.users[uid];
     const changes=[];
-    if(x.name!==name)changes.push(`name: "${x.name}" → "${name}"`);
-    if(x.email!==email)changes.push(`email: "${x.email}" → "${email}"`);
-    if(x.role!==role)changes.push(`role: "${x.role}" → "${role}"`);
-    if(pwd&&pwd.length>=6)changes.push('password changed');
-    x.name=name; x.email=email; x.role=role; x.perms=perms;
+    if(x.name!==name)changes.push(`name → "${name}"`);
+    if(x.email!==email)changes.push(`email → "${email}"`);
+    if(x.role!==role)changes.push(`role → "${role}"`);
+    const upd={name,email,role,perms};
+    if(pwd&&pwd.length>=6){upd.pwd=pwd;changes.push('password changed');}
+    if(role==='media_buyer')upd.ve=ve;
+    await sb.from('users').update(upd).eq('id',uid);
+    x.name=name;x.email=email;x.role=role;x.perms=perms;
     if(pwd&&pwd.length>=6)x.pwd=pwd;
     if(role==='media_buyer')x.ve=ve;
-    logHistory('updated','user',uid,`Edited user ${name}${changes.length?' — '+changes.join(', '):''}`);
+    await logHistory('updated','user',uid,`Edited user ${name}${changes.length?' — '+changes.join(', '):''}`);
   }
   closeM2(); render();
 }
-function toggleUser(id){
+async function toggleUser(id){
   APP.users[id].active=!APP.users[id].active;
-  logHistory('updated','user',id,`${APP.users[id].active?'Activated':'Deactivated'} user ${APP.users[id].name}`);
+  await sb.from('users').update({active:APP.users[id].active}).eq('id',id);
+  await logHistory('updated','user',id,`${APP.users[id].active?'Activated':'Deactivated'} user ${APP.users[id].name}`);
   render();
 }
-function delUser(id){
+async function delUser(id){
   if(id==='youssef'){alert('Cannot delete the admin.');return;}
   if(!confirm('Delete '+APP.users[id].name+'? This cannot be undone.'))return;
   const name=APP.users[id].name;
   delete APP.users[id];
-  logHistory('deleted','user',id,`Deleted user ${name}`);
+  await sb.from('users').delete().eq('id',id);
+  await logHistory('deleted','user',id,`Deleted user ${name}`);
   render();
 }
 
@@ -2093,8 +2086,8 @@ function openAssignProd(mbId){
   <div class="mf"><button class="btn btn-out" onclick="closeM2()">Close</button></div>`;
   openM2();
 }
-function addProd(mb,pid){ if(!APP.users[mb].products.includes(pid))APP.users[mb].products.push(pid); }
-function rmProd(mb,pid){ APP.users[mb].products=APP.users[mb].products.filter(i=>i!==pid); render(); }
+async function addProd(mb,pid){ if(!APP.users[mb].products.includes(pid)){APP.users[mb].products.push(pid); await sb.from('users').update({products:APP.users[mb].products}).eq('id',mb);} }
+async function rmProd(mb,pid){ APP.users[mb].products=APP.users[mb].products.filter(i=>i!==pid); await sb.from('users').update({products:APP.users[mb].products}).eq('id',mb); render(); }
 
 // ══════════════════════════════════════════════════════════
 // MODAL: PRODUCT VIEW (+ tabs)
@@ -2141,10 +2134,10 @@ function prodTabContent(t,pid){
       ${isVE||isA?`<div class="divider"></div><div class="fg"><label class="fl">${isVE?'Upload your raw clips link (one-time)':'Edit raw clips link'}</label><input class="fi" id="raw_${pid}" placeholder="https://drive.google.com/drive/folders/..." value="${p.rawVideo||''}"></div><button class="btn btn-pri btn-sm" onclick="saveRaw(${pid})">Save link</button>${has?`<button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="APP.products.find(x=>x.id===${pid}).rawVideo='';prodTab('r',${pid});render()">Remove</button>`:''}`:''}`;
   }
 }
-function pImgSel(e,pid){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>{const p=pr(pid);if(!p.images)p.images=[];p.images.push(ev.target.result);prodTab('i',pid);document.getElementById('pt_i').textContent='🖼 Images ('+p.images.length+')';};r.readAsDataURL(f);}); }
+function pImgSel(e,pid){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=async ev=>{const p=pr(pid);if(!p.images)p.images=[];p.images.push(ev.target.result);await sb.from('products').update({images:p.images}).eq('id',pid);prodTab('i',pid);document.getElementById('pt_i').textContent='🖼 Images ('+p.images.length+')';};r.readAsDataURL(f);}); }
 function pImgDrop(e,pid){ e.preventDefault(); pImgSel({target:{files:e.dataTransfer.files}},pid); }
-function delPImg(pid,i){ const p=pr(pid); p.images.splice(i,1); prodTab('i',pid); document.getElementById('pt_i').textContent='🖼 Images ('+p.images.length+')'; }
-function saveRaw(pid){ pr(pid).rawVideo=document.getElementById('raw_'+pid).value.trim(); prodTab('r',pid); render(); }
+async function delPImg(pid,i){ const p=pr(pid); p.images.splice(i,1); await sb.from('products').update({images:p.images}).eq('id',pid); prodTab('i',pid); document.getElementById('pt_i').textContent='🖼 Images ('+p.images.length+')'; }
+async function saveRaw(pid){ pr(pid).rawVideo=document.getElementById('raw_'+pid).value.trim(); await sb.from('products').update({raw_video:pr(pid).rawVideo}).eq('id',pid); prodTab('r',pid); render(); }
 
 // ══════════════════════════════════════════════════════════
 // MODAL: PRODUCT FORM (add / edit, paste-based)
@@ -2197,7 +2190,7 @@ function fImgSel(e){ Array.from(e.target.files).forEach(f=>{const r=new FileRead
 function fImgDrop(e){ e.preventDefault(); fImgSel({target:{files:e.dataTransfer.files}}); }
 function fGrid(){ document.getElementById('fimgs').innerHTML=_formImgs.map((s,i)=>`<div class="imw"><img src="${s}"><div class="x" onclick="rmFImg(${i})">✕</div></div>`).join(''); }
 function rmFImg(i){ _formImgs.splice(i,1); fGrid(); }
-function saveProduct(editId){
+async function saveProduct(editId){
   const name=document.getElementById('p_name').value.trim();
   const url=document.getElementById('p_url').value.trim();
   const cat=document.getElementById('p_cat').value.trim()||'General';
@@ -2207,22 +2200,34 @@ function saveProduct(editId){
   const hooks=parseLines(document.getElementById('p_hooks').value);
   if(!name||!url){ alert('Name and URL required.'); return; }
   if(editId==='null'||editId===null){
-    const id=Math.max(...APP.products.map(p=>p.id),0)+1;
-    APP.products.push({id,name,url,cat,market,lang,images:[..._formImgs],angles,hooks,rawVideo:''});
-    logHistory('created','product',id,`Added product "${name}" (${market}) — ${angles.length} angles, ${hooks.length} hooks`);
+    const row={name,url,cat,market,lang,images:[..._formImgs],angles,hooks,raw_video:''};
+    const { data } = await sb.from('products').insert([row]).select().single();
+    if(data) APP.products.push(rowToProduct(data));
+    await logHistory('created','product',data?.id||0,`Added product "${name}" (${market}) — ${angles.length} angles, ${hooks.length} hooks`);
   } else {
-    const p=pr(editId); p.name=name; p.url=url; p.cat=cat; p.market=market; p.lang=lang; p.images=[..._formImgs];
+    const p=pr(editId);
+    const upd={name,url,cat,market,lang,images:[..._formImgs]};
+    if(angles.length)upd.angles=angles; if(hooks.length)upd.hooks=hooks;
+    await sb.from('products').update(upd).eq('id',editId);
+    p.name=name;p.url=url;p.cat=cat;p.market=market;p.lang=lang;p.images=[..._formImgs];
     if(angles.length)p.angles=angles; if(hooks.length)p.hooks=hooks;
-    logHistory('updated','product',editId,`Edited product "${name}"`);
+    await logHistory('updated','product',editId,`Edited product "${name}"`);
   }
   _formImgs=[]; closeM2(); APP.page='products'; render();
 }
-function delProduct(id){
+async function delProduct(id){
   if(!confirm('Delete this product?'))return;
   const name=pr(id)?.name||'product';
   APP.products=APP.products.filter(p=>p.id!==id);
-  Object.values(APP.users).forEach(u=>u.products=(u.products||[]).filter(i=>i!==id));
-  logHistory('deleted','product',id,`Deleted product "${name}"`);
+  // Remove from all users' product lists
+  for(const u of Object.values(APP.users)){
+    if((u.products||[]).includes(id)){
+      u.products=u.products.filter(i=>i!==id);
+      await sb.from('users').update({products:u.products}).eq('id',u.id);
+    }
+  }
+  await sb.from('products').delete().eq('id',id);
+  await logHistory('deleted','product',id,`Deleted product "${name}"`);
   closeM2(); render();
 }
 
@@ -2237,7 +2242,19 @@ function go(p){ APP.page=p; APP.tab='all'; render(); }
 document.getElementById('mo1').addEventListener('click',function(e){ if(e.target===this)closeM1(); });
 document.getElementById('mo2').addEventListener('click',function(e){ if(e.target===this)closeM2(); });
 
-renderAuth();
+// ── STARTUP: load everything from Supabase, then show login ──
+(async function init(){
+  try {
+    await loadAllData();
+    await new Promise(r=>setTimeout(r,250));
+    hideLoader();
+    renderAuth();
+  } catch(err){
+    console.error('Supabase init error:', err);
+    document.getElementById('loadMsg').textContent='Connection error — reload to try again';
+    document.getElementById('loadMsg').style.color='#F87171';
+  }
+})();
 </script>
 </body>
 </html>
