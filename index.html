@@ -600,6 +600,7 @@ async function login(){
   if(error||!users||users.length===0){ renderAuth('Invalid email or password.'); return; }
   const f = users[0];
   APP.me=f.id; APP.authed=true;
+  APP.page = f.role==='product_lister' ? 'products' : 'dashboard';
   APP.dashUser=f.role==='admin'?(Object.values(APP.users).find(x=>x.role==='video_editor')?.id||null):null;
   document.getElementById('auth').style.display='none';
   document.getElementById('app').style.display='flex';
@@ -635,6 +636,9 @@ function render(){
   ` : me.role==='video_editor' ? `
     ${ni('dashboard','◧','Dashboard')}
     ${ni('tasks','▤','My Tasks',rev)}
+    ${ni('products','▣','Products')}
+    ${ni('testproducts','⬡','Products to Test')}
+  ` : me.role==='product_lister' ? `
     ${ni('products','▣','Products')}
     ${ni('testproducts','⬡','Products to Test')}
   ` : `
@@ -701,6 +705,7 @@ function pgDash(){
   const me=u();
   if(me.role==='admin') return dashAdmin();
   if(me.role==='video_editor') return dashVE(APP.me);
+  if(me.role==='product_lister') return `<div class="empty"><div class="empty-i">▣</div><div class="empty-t">Use the Products or Products to Test menu to manage your catalog.</div></div>`;
   return dashMB(APP.me);
 }
 
@@ -1053,11 +1058,14 @@ function pgReports(){
 // ══════════════════════════════════════════════════════════
 function pgProducts(){
   const me=u();
+  const isPL = me.role==='product_lister';
+  const isA  = me.role==='admin';
+  const canManage = isA || isPL;
   const ids = me.role==='media_buyer'?me.products : me.role==='video_editor'?[...new Set(myTasks().map(t=>t.productId))] : APP.products.map(p=>p.id);
-  const prods = me.role==='admin'?APP.products:APP.products.filter(p=>ids.includes(p.id));
+  const prods = canManage ? APP.products : APP.products.filter(p=>ids.includes(p.id));
   return `
-  ${me.role==='video_editor'?`<div class="al al-i"><i>▣</i><div>Your assigned products. Angles & hooks are in <b>English</b>. Use the <b>Raw Clips</b> tab to upload your raw footage once per product.</div></div>`:''}
-  ${me.role==='admin'?`<div style="display:flex;justify-content:flex-end;margin-bottom:16px"><button class="btn btn-pri btn-sm" onclick="openProductForm()">+ Add Product</button></div>`:''}
+  ${me.role==='video_editor'?`<div class="al al-i"><i>▣</i><div>Your assigned products. Angles &amp; hooks are in <b>English</b>. Use the <b>Raw Clips</b> tab to upload your raw footage once per product.</div></div>`:''}
+  ${canManage?`<div style="display:flex;justify-content:flex-end;margin-bottom:16px"><button class="btn btn-pri btn-sm" onclick="openProductForm()">+ Add Product</button></div>`:''}
   <div class="pgrid">
     ${prods.map(p=>{
       const tc=myTasks().filter(t=>t.productId===p.id).length;
@@ -1089,6 +1097,8 @@ function pgTestProducts(){
   const isA=me.role==='admin';
   const isMB=me.role==='media_buyer';
   const isVE=me.role==='video_editor';
+  const isPL=me.role==='product_lister';
+  const canManage = isA || isPL;
   if(APP.tpFilter===undefined) APP.tpFilter={from:'',to:''};
   const tf=APP.tpFilter;
 
@@ -1096,7 +1106,7 @@ function pgTestProducts(){
   // Admin: all test products, can add/edit/assign
   // MB: only products assigned to them, can log test results
   // VE: only products they have test tasks for
-  const myTP = isA ? APP.testProducts :
+  const myTP = canManage ? APP.testProducts :
                isMB ? APP.testProducts.filter(p=>p.assignedMBs?.includes(APP.me)) :
                [...new Set(APP.tasks.filter(t=>t.isTest&&t.assignedVE===APP.me&&t.testProductId).map(t=>t.testProductId))].map(id=>APP.testProducts.find(p=>p.id===id)).filter(Boolean);
 
@@ -1106,11 +1116,11 @@ function pgTestProducts(){
     <span style="color:var(--muted);font-size:12px">to</span>
     <input type="date" class="fi" style="width:auto;padding:6px 10px;font-size:12px" value="${tf.to}" onchange="APP.tpFilter.to=this.value;render()" title="To">
     ${(tf.from||tf.to)?`<button class="btn btn-ghost btn-sm" onclick="APP.tpFilter={from:'',to:''};render()">Clear ✕</button>`:''}
-    ${isA?`<button class="btn btn-pri btn-sm" style="margin-left:auto" onclick="openTestProductForm()">+ Add Test Product</button>`:''}
+    ${canManage?`<button class="btn btn-pri btn-sm" style="margin-left:auto" onclick="openTestProductForm()">+ Add Test Product</button>`:''}
   </div>`;
 
   return filterBar + `
-  ${myTP.length===0?`<div class="empty"><div class="empty-i">🧪</div><div class="empty-t">No test products${isA?' added yet':' assigned to you'}</div></div>`:''}
+  ${myTP.length===0?`<div class="empty"><div class="empty-i">🧪</div><div class="empty-t">No test products${canManage?' added yet':' assigned to you'}</div></div>`:''}
   ${myTP.map(tp=>{
     let testTasks=APP.tasks.filter(t=>t.testProductId===tp.id);
     let results=tp.testResults||[];
@@ -1132,7 +1142,7 @@ function pgTestProducts(){
           </div>
         </div>
         <div style="display:flex;gap:8px">
-          ${isA?`<button class="btn btn-out btn-sm" onclick="openTestProductForm(${tp.id})">Edit</button>`:''}
+          ${canManage?`<button class="btn btn-out btn-sm" onclick="openTestProductForm(${tp.id})">Edit</button>`:''}
           ${isMB?`<button class="btn btn-pri btn-sm" onclick="openTestResultModal(${tp.id})">+ Log Result</button>`:''}
         </div>
       </div>
@@ -1142,7 +1152,7 @@ function pgTestProducts(){
           ${tp.notes?`<div style="flex:1"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Notes</div><div style="font-size:12px;color:var(--sub)">${tp.notes}</div></div>`:''}
         </div>
 
-        ${isA&&tp.assignedMBs?.length?`<div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:5px">Assigned to</div><div>${tp.assignedMBs.map(id=>`<span style="display:inline-flex;align-items:center;gap:5px;margin-right:8px">${av(id,20)}<span style="font-size:12px">${APP.users[id]?.name||id}</span></span>`).join('')}</div></div>`:''}
+        ${canManage&&tp.assignedMBs?.length?`<div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:5px">Assigned to</div><div>${tp.assignedMBs.map(id=>`<span style="display:inline-flex;align-items:center;gap:5px;margin-right:8px">${av(id,20)}<span style="font-size:12px">${APP.users[id]?.name||id}</span></span>`).join('')}</div></div>`:''}
 
         <div class="g2">
           <div>
@@ -2006,7 +2016,7 @@ function openUserModal(uid=null){
     <div class="fg"><label class="fl">Password ${isEdit?'<span style="font-weight:400;color:var(--muted)">(blank = unchanged)</span>':'<span class="rq">*</span>'}</label><input class="fi" id="u_pwd" type="password" placeholder="${isEdit?'New password...':'Minimum 6 characters'}"></div>
     <div class="fg"><label class="fl">Role <span class="rq">*</span></label>
       <select class="fi" id="u_role" onchange="userRoleChange()">
-        ${['video_editor','media_buyer','admin'].map(r=>`<option value="${r}" ${isEdit&&x.role===r?'selected':''}>${r.replace('_',' ')}</option>`).join('')}
+        ${['video_editor','media_buyer','product_lister','admin'].map(r=>`<option value="${r}" ${isEdit&&x.role===r?'selected':''}>${r.replace('_',' ')}</option>`).join('')}
       </select>
     </div>
     <div id="u_mbExtra" style="display:${(isEdit?x.role:'video_editor')==='media_buyer'?'block':'none'}">
@@ -2095,11 +2105,12 @@ async function rmProd(mb,pid){ APP.users[mb].products=APP.users[mb].products.fil
 function openProductModal(pid){
   const p=pr(pid); if(!p)return;
   const me=u();
-  const isVE=me.role==='video_editor', isA=me.role==='admin';
+  const isVE=me.role==='video_editor', isA=me.role==='admin', isPL=me.role==='product_lister';
+  const canManage = isA || isPL;
   document.getElementById('md2').innerHTML=`
   <div class="mh">
     <div><div class="mt">${p.name}</div><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${mchip(p.market)}${chip(p.lang,'n')}${chip(p.cat,'n')}</div></div>
-    <div style="display:flex;gap:8px">${isA?`<button class="btn btn-out btn-sm" onclick="closeM2();openProductForm(${pid})">Edit</button>`:''}<button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
+    <div style="display:flex;gap:8px">${canManage?`<button class="btn btn-out btn-sm" onclick="closeM2();openProductForm(${pid})">Edit</button>`:''}<button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
   </div>
   <div class="mb">
     <div class="tabs" style="flex-wrap:wrap">
@@ -2114,13 +2125,14 @@ function openProductModal(pid){
 }
 function prodTab(t,pid){ ['a','h','i','r'].forEach(k=>document.getElementById('pt_'+k).className='tab'+(k===t?' on':'')); document.getElementById('ptc').innerHTML=prodTabContent(t,pid); }
 function prodTabContent(t,pid){
-  const p=pr(pid); const me=u(); const isVE=me.role==='video_editor', isA=me.role==='admin';
+  const p=pr(pid); const me=u(); const isVE=me.role==='video_editor', isA=me.role==='admin', isPL=me.role==='product_lister';
+  const canManage = isA || isPL;
   if(t==='a') return p.angles.map((a,i)=>`<div class="pp-item"><span class="pp-n">#${i+1}</span>${a}</div>`).join('')||'<div class="empty"><div class="empty-t">No angles</div></div>';
   if(t==='h') return p.hooks.map((h,i)=>`<div class="pp-item"><span class="pp-n">H${String(i+1).padStart(2,'0')}</span>${h}</div>`).join('')||'<div class="empty"><div class="empty-t">No hooks</div></div>';
   if(t==='i'){
     const imgs=p.images||[];
-    return `${isA?`<div class="drop" onclick="document.getElementById('pimg_${pid}').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="pImgDrop(event,${pid})"><input type="file" id="pimg_${pid}" accept="image/*" multiple onchange="pImgSel(event,${pid})"><div style="font-size:26px;margin-bottom:6px">🖼</div><div style="font-size:13px;font-weight:600;color:var(--sub)">Click or drag images</div></div>`:''}
-      ${imgs.length?`<div class="imgs" style="margin-top:${isA?'12px':'0'}">${imgs.map((s,i)=>`<div class="imw"><img src="${s}">${isA?`<div class="x" onclick="delPImg(${pid},${i})">✕</div>`:''}</div>`).join('')}</div>`:`<div class="empty"><div class="empty-i">🖼</div><div class="empty-t">No images yet</div></div>`}`;
+    return `${canManage?`<div class="drop" onclick="document.getElementById('pimg_${pid}').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="pImgDrop(event,${pid})"><input type="file" id="pimg_${pid}" accept="image/*" multiple onchange="pImgSel(event,${pid})"><div style="font-size:26px;margin-bottom:6px">🖼</div><div style="font-size:13px;font-weight:600;color:var(--sub)">Click or drag images</div></div>`:''}
+      ${imgs.length?`<div class="imgs" style="margin-top:${canManage?'12px':'0'}">${imgs.map((s,i)=>`<div class="imw"><img src="${s}">${canManage?`<div class="x" onclick="delPImg(${pid},${i})">✕</div>`:''}</div>`).join('')}</div>`:`<div class="empty"><div class="empty-i">🖼</div><div class="empty-t">No images yet</div></div>`}`;
   }
   if(t==='r'){
     const has=p.rawVideo&&p.rawVideo.trim();
@@ -2131,7 +2143,7 @@ function prodTabContent(t,pid){
         <div style="flex:1;min-width:0"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">${has?'Raw clips available':'No clips uploaded'}</div>${has?`<a href="${p.rawVideo}" target="_blank" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">${p.rawVideo}</a>`:`<div style="font-size:12px;color:var(--muted)">Waiting for editor</div>`}</div>
         ${has?`<a href="${p.rawVideo}" target="_blank" class="btn btn-out btn-sm">Open ↗</a>`:''}
       </div>
-      ${isVE||isA?`<div class="divider"></div><div class="fg"><label class="fl">${isVE?'Upload your raw clips link (one-time)':'Edit raw clips link'}</label><input class="fi" id="raw_${pid}" placeholder="https://drive.google.com/drive/folders/..." value="${p.rawVideo||''}"></div><button class="btn btn-pri btn-sm" onclick="saveRaw(${pid})">Save link</button>${has?`<button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="APP.products.find(x=>x.id===${pid}).rawVideo='';prodTab('r',${pid});render()">Remove</button>`:''}`:''}`;
+      ${isVE||canManage?`<div class="divider"></div><div class="fg"><label class="fl">${isVE?'Upload your raw clips link (one-time)':'Edit raw clips link'}</label><input class="fi" id="raw_${pid}" placeholder="https://drive.google.com/drive/folders/..." value="${p.rawVideo||''}"></div><button class="btn btn-pri btn-sm" onclick="saveRaw(${pid})">Save link</button>${has?`<button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="APP.products.find(x=>x.id===${pid}).rawVideo='';prodTab('r',${pid});render()">Remove</button>`:''}`:''}`;
   }
 }
 function pImgSel(e,pid){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=async ev=>{const p=pr(pid);if(!p.images)p.images=[];p.images.push(ev.target.result);await sb.from('products').update({images:p.images}).eq('id',pid);prodTab('i',pid);document.getElementById('pt_i').textContent='🖼 Images ('+p.images.length+')';};r.readAsDataURL(f);}); }
