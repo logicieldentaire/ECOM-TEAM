@@ -307,8 +307,8 @@ function hideLoader(){ document.getElementById('loadingOverlay').style.display='
 
 // ─── Row → APP format converters ───
 function rowToUser(r){ return { id:r.id, name:r.name, role:r.role, av:r.av, email:r.email, pwd:r.pwd, products:r.products||[], ve:r.ve||null, active:r.active, perms:r.perms||{} }; }
-function rowToProduct(r){ return { id:r.id, name:r.name, market:r.market, lang:r.lang, cat:r.cat, url:r.url, images:r.images||[], angles:r.angles||[], hooks:r.hooks||[], rawVideo:r.raw_video||'' }; }
-function rowToTestProduct(r){ return { id:r.id, name:r.name, url:r.url, market:r.market, lang:r.lang, notes:r.notes||'', assignedMBs:r.assigned_mbs||[], status:r.status||'testing', testResults:r.test_results||[], createdAt:r.created_at }; }
+function rowToProduct(r){ return { id:r.id, name:r.name, market:r.market, lang:r.lang, cat:r.cat, url:r.url, images:r.images||[], angles:r.angles||[], hooks:r.hooks||[], rawVideo:r.raw_video||'', status:r.status||'High stock', priority:r.priority||'Medium', storeLinks:r.store_links||[] }; }
+function rowToTestProduct(r){ return { id:r.id, name:r.name, url:r.url, market:r.market, lang:r.lang, notes:r.notes||'', assignedMBs:r.assigned_mbs||[], status:r.status||'testing', testResults:r.test_results||[], images:r.images||[], createdAt:r.created_at }; }
 function rowToTask(r){ return { id:r.id, productId:r.product_id, testProductId:r.test_product_id, taskDate:r.task_date, day:r.day, assignedMB:r.assigned_mb, assignedVE:r.assigned_ve, campaignType:r.campaign_type, videoType:r.video_type, voiceOver:r.voice_over, angle:r.angle, variants:r.variants||[], status:r.status, revisionNote:r.revision_note||'', mbNote:r.mb_note||'', managerApproval:r.manager_approval||'pending', deadlineDate:r.deadline_date, isTest:r.is_test||false, testProductName:r.test_product_name||'', testMarket:r.test_market||'', createdAt:r.created_at, updatedAt:r.updated_at }; }
 function rowToReport(r){ return { id:r.id, mbId:r.mb_id, productId:r.product_id, date:r.date, spend:r.spend, leads:r.leads, cpl:r.cpl }; }
 function rowToHistory(r){ return { id:r.id, action:r.action, entity:r.entity, entityId:r.entity_id, description:r.description, byUser:r.by_user, byName:r.by_name, at:r.created_at }; }
@@ -363,6 +363,12 @@ async function loadAllData(){
 const VIDEO_TYPES = ['100% UGC AI VIDEO','AI UGC With Mixed clips','Green Screen Avatar','4 AI Images Slideshow','1 Script 4 Different Hooks','3 AI Generated Scenarios','3 Scripts AI Testimonial'];
 const VOICES = ['English Kenyan Accent','French African Accent','Kenyan Swahili','Tanzanian Swahili','Arabic Moroccan Darija','French General','Arabic Lebanese Accent','English Adam Voice'];
 const MARKET_LIST = ['KENYA','TANZANIA','CONGO KINSHASA','LEBANON','MOROCCO'];
+const STOCK_STATUSES = ['High stock','Medium stock','Low stock','Out of stock','Stop for now — Delivery rate too low'];
+const STOCK_STATUS_STYLE = {
+  'High stock':'ok', 'Medium stock':'a', 'Low stock':'w', 'Out of stock':'b', 'Stop for now — Delivery rate too low':'b'
+};
+const PRIORITIES = ['High','Medium','Low'];
+const PRIORITY_STYLE = { High:'b', Medium:'w', Low:'n' };
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const DAY_IDX = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5 };
 
@@ -1078,6 +1084,7 @@ function pgProducts(){
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px"><div class="pcard-n">${p.name}</div>${mchip(p.market)}</div>
           <div class="pcard-u">${p.url}</div>
           <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">${chip(p.cat,'n')}${chip(p.lang,'n')}${hasRaw?chip('Raw clips ✓','ok'):''}</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">${chip(p.status||'High stock',STOCK_STATUS_STYLE[p.status]||'n')}${chip((p.priority||'Medium')+' priority',PRIORITY_STYLE[p.priority]||'n')}</div>
           <div class="pcard-a">${p.angles[0]||'No angles yet'}</div>
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div style="font-size:10px;color:var(--muted)"><b style="color:var(--ink)">${p.angles.length}</b> angles · <b style="color:var(--ink)">${p.hooks.length}</b> hooks · <b style="color:var(--ink)">${hasImg?p.images.length:0}</b> imgs${wc>0?` · <b style="color:var(--ok)">${wc} win</b>`:''}</div>
@@ -1131,7 +1138,7 @@ function pgTestProducts(){
     return `<div class="card" style="margin-bottom:16px">
       <div class="card-h">
         <div style="display:flex;align-items:center;gap:12px">
-          <div style="width:40px;height:40px;background:var(--s100);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:20px">🧪</div>
+          <div style="width:40px;height:40px;background:var(--s100);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:20px;overflow:hidden">${tp.images&&tp.images.length?`<img src="${tp.images[0]}" style="width:100%;height:100%;object-fit:cover">`:'🧪'}</div>
           <div>
             <div style="font-size:15px;font-weight:700">${tp.name}</div>
             <div style="display:flex;gap:6px;margin-top:3px">
@@ -1147,6 +1154,7 @@ function pgTestProducts(){
         </div>
       </div>
       <div class="card-b">
+        ${tp.images&&tp.images.length?`<div class="imgs" style="grid-template-columns:repeat(auto-fill,minmax(64px,1fr));margin-bottom:14px">${tp.images.map(s=>`<div class="imw"><img src="${s}"></div>`).join('')}</div>`:''}
         <div style="display:flex;gap:14px;margin-bottom:14px;flex-wrap:wrap">
           <div><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Product link</div><a href="${tp.url}" target="_blank" style="font-size:12px">${tp.url}</a></div>
           ${tp.notes?`<div style="flex:1"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Notes</div><div style="font-size:12px;color:var(--sub)">${tp.notes}</div></div>`:''}
@@ -1182,10 +1190,24 @@ function pgTestProducts(){
   }).join('')}`;
 }
 
+let _tpFormImgs=[];
+function tpImgSel(e){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>{_tpFormImgs.push(ev.target.result);tpImgGrid();};r.readAsDataURL(f);}); }
+function tpImgDrop(e){ e.preventDefault(); tpImgSel({target:{files:e.dataTransfer.files}}); }
+function tpImgGrid(){ document.getElementById('tpimgs').innerHTML=_tpFormImgs.map((s,i)=>`<div class="imw"><img src="${s}"><div class="x" onclick="rmTpImg(${i})">✕</div></div>`).join(''); }
+function rmTpImg(i){ _tpFormImgs.splice(i,1); tpImgGrid(); }
+async function delTestProduct(id){
+  const name=APP.testProducts.find(p=>p.id===id)?.name||'product';
+  APP.testProducts=APP.testProducts.filter(p=>p.id!==id);
+  await sb.from('test_products').delete().eq('id',id);
+  await logHistory('deleted','testproduct',id,`Deleted test product "${name}"`);
+  closeM2(); render();
+}
+
 function openTestProductForm(editId=null){
   const isEdit=editId!==null;
   const tp=isEdit?APP.testProducts.find(p=>p.id===editId):null;
   const mbs=Object.values(APP.users).filter(x=>x.role==='media_buyer');
+  _tpFormImgs = isEdit ? [...(tp.images||[])] : [];
   document.getElementById('md2').innerHTML=`
   <div class="mh"><div><div class="mt">${isEdit?'Edit Test Product':'Add Test Product'}</div><div class="ms">Products assigned to MB for creative testing</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
   <div class="mb">
@@ -1203,6 +1225,10 @@ function openTestProductForm(editId=null){
     </div>
     <div class="fg"><label class="fl">Notes / Instructions for MB & VE</label><textarea class="fi" id="tp_notes" rows="3" placeholder="Describe the product, what angles to try, target audience...">${isEdit?tp.notes||'':''}</textarea></div>
     <div class="divider"></div>
+    <div class="sec-t"><span class="sec-n">1</span> Product images</div>
+    <div class="drop" onclick="document.getElementById('tpimg').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="tpImgDrop(event)"><input type="file" id="tpimg" accept="image/*" multiple onchange="tpImgSel(event)"><div style="font-size:26px;margin-bottom:6px">🖼</div><div style="font-size:13px;font-weight:600;color:var(--sub)">Click or drag images</div></div>
+    <div class="imgs" id="tpimgs">${_tpFormImgs.map((s,i)=>`<div class="imw"><img src="${s}"><div class="x" onclick="rmTpImg(${i})">✕</div></div>`).join('')}</div>
+    <div class="divider"></div>
     <div style="font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Assign to media buyers</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap" id="tp_mb_pick">
       ${mbs.map(m=>`<button class="upill ${isEdit&&tp.assignedMBs?.includes(m.id)?'on':''}" id="tpmb_${m.id}" onclick="toggleTpMB('${m.id}')" type="button">${av(m.id,22)} ${m.name}</button>`).join('')}
@@ -1216,7 +1242,7 @@ function openTestProductForm(editId=null){
       <input type="hidden" id="tp_status" value="${tp.status||'testing'}">`
     :`<input type="hidden" id="tp_status" value="testing">`}
   </div>
-  <div class="mf">${isEdit?`<button class="btn btn-bad btn-sm" onclick="if(confirm('Delete?')){APP.testProducts=APP.testProducts.filter(p=>p.id!==${editId});closeM2();render()}">Delete</button>`:''}<button class="btn btn-out" onclick="closeM2()">Cancel</button><button class="btn btn-pri" onclick="saveTestProduct(${isEdit?editId:'null'})">Save</button></div>`;
+  <div class="mf">${isEdit?`<button class="btn btn-bad btn-sm" onclick="if(confirm('Delete?')){delTestProduct(${editId})}">Delete</button>`:''}<button class="btn btn-out" onclick="closeM2()">Cancel</button><button class="btn btn-pri" onclick="saveTestProduct(${isEdit?editId:'null'})">Save</button></div>`;
   openM2();
 }
 
@@ -1237,18 +1263,20 @@ async function saveTestProduct(editId){
   const notes=document.getElementById('tp_notes')?.value?.trim();
   const assignedMBs=JSON.parse(document.getElementById('tp_mbs')?.value||'[]');
   const status=document.getElementById('tp_status')?.value||'testing';
+  const images=[..._tpFormImgs];
   if(!name||!url){ alert('Name and URL required.'); return; }
   if(editId==='null'||editId===null){
-    const row={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,test_results:[]};
+    const row={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,test_results:[],images};
     const { data } = await sb.from('test_products').insert([row]).select().single();
     if(data) APP.testProducts.push(rowToTestProduct(data));
     await logHistory('created','testproduct',data?.id||0,`Added test product "${name}" (${market}) — assigned to ${assignedMBs.map(id=>APP.users[id]?.name).join(', ')||'no one'}`);
   } else {
     const tp=APP.testProducts.find(p=>p.id===editId);
-    if(tp){ tp.name=name;tp.url=url;tp.market=market;tp.lang=lang;tp.notes=notes;tp.assignedMBs=assignedMBs;tp.status=status; }
-    await sb.from('test_products').update({name,url,market,lang,notes,assigned_mbs:assignedMBs,status}).eq('id',editId);
+    if(tp){ tp.name=name;tp.url=url;tp.market=market;tp.lang=lang;tp.notes=notes;tp.assignedMBs=assignedMBs;tp.status=status;tp.images=images; }
+    await sb.from('test_products').update({name,url,market,lang,notes,assigned_mbs:assignedMBs,status,images}).eq('id',editId);
     await logHistory('updated','testproduct',editId,`Edited test product "${name}" — status: ${status}`);
   }
+  _tpFormImgs=[];
   closeM2(); render();
 }
 
@@ -2124,9 +2152,18 @@ function openProductModal(pid){
   const me=u();
   const isVE=me.role==='video_editor', isA=me.role==='admin', isPL=me.role==='product_lister';
   const canManage = isA || isPL;
+  const storeLinksHtml = (p.storeLinks&&p.storeLinks.length) ? `
+    <div style="margin-top:11px;padding-top:11px;border-top:1px solid var(--border)">
+      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px">Also sold on</div>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        ${p.storeLinks.map(sl=>`<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="font-weight:600;min-width:90px">${sl.store||'Store'}</span><a href="${sl.url}" target="_blank" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sl.url}</a></div>`).join('')}
+      </div>
+    </div>` : '';
   document.getElementById('md2').innerHTML=`
   <div class="mh">
-    <div><div class="mt">${p.name}</div><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${mchip(p.market)}${chip(p.lang,'n')}${chip(p.cat,'n')}</div></div>
+    <div><div class="mt">${p.name}</div><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${mchip(p.market)}${chip(p.lang,'n')}${chip(p.cat,'n')}${chip(p.status||'High stock',STOCK_STATUS_STYLE[p.status]||'n')}${chip((p.priority||'Medium')+' priority',PRIORITY_STYLE[p.priority]||'n')}</div>
+      ${storeLinksHtml}
+    </div>
     <div style="display:flex;gap:8px">${canManage?`<button class="btn btn-out btn-sm" onclick="closeM2();openProductForm(${pid})">Edit</button>`:''}<button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
   </div>
   <div class="mb">
@@ -2177,6 +2214,7 @@ function openProductForm(editId=null){
   const isEdit=editId!==null;
   const p=isEdit?pr(editId):null;
   _formImgs=isEdit?[...(p.images||[])]:[];
+  _formStoreLinks=isEdit?[...(p.storeLinks||[])]:[];
   document.getElementById('md2').innerHTML=`
   <div class="mh"><div><div class="mt">${isEdit?'Edit product':'Add product'}</div><div class="ms">${isEdit?'Update info, images, angles & hooks':'Fill info then paste your angles & hooks'}</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
   <div class="mb">
@@ -2184,17 +2222,30 @@ function openProductForm(editId=null){
       <div class="fg" style="flex:2;min-width:180px"><label class="fl">Product name <span class="rq">*</span></label><input class="fi" id="p_name" value="${isEdit?p.name:''}" placeholder="ThreadMaster™ Pro"></div>
       <div class="fg" style="flex:1;min-width:130px"><label class="fl">Category</label><input class="fi" id="p_cat" value="${isEdit?p.cat:''}" placeholder="Plumbing"></div>
     </div>
-    <div class="fg"><label class="fl">Product URL <span class="rq">*</span></label><input class="fi" id="p_url" value="${isEdit?p.url:''}" placeholder="harakastore.shop/products/..."></div>
+    <div class="fg"><label class="fl">Main product URL <span class="rq">*</span></label><input class="fi" id="p_url" value="${isEdit?p.url:''}" placeholder="harakastore.shop/products/..."></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div class="fg" style="flex:1;min-width:140px"><label class="fl">Market <span class="rq">*</span></label><select class="fi" id="p_market">${MARKET_LIST.map(m=>`<option ${isEdit&&p.market===m?'selected':''}>${m}</option>`).join('')}</select></div>
       <div class="fg" style="flex:1;min-width:120px"><label class="fl">Ad language</label><select class="fi" id="p_lang">${['English','French','Swahili','Arabic'].map(l=>`<option ${isEdit&&p.lang===l?'selected':''}>${l}</option>`).join('')}</select></div>
     </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div class="fg" style="flex:1;min-width:200px"><label class="fl">Stock status <span class="rq">*</span></label>
+        <select class="fi" id="p_status">${STOCK_STATUSES.map(s=>`<option ${isEdit&&p.status===s?'selected':(!isEdit&&s==='High stock')?'selected':''}>${s}</option>`).join('')}</select>
+      </div>
+      <div class="fg" style="flex:1;min-width:140px"><label class="fl">Priority <span class="rq">*</span></label>
+        <select class="fi" id="p_priority">${PRIORITIES.map(pr=>`<option ${isEdit&&p.priority===pr?'selected':(!isEdit&&pr==='Medium')?'selected':''}>${pr}</option>`).join('')}</select>
+      </div>
+    </div>
     <div class="divider"></div>
-    <div class="sec-t"><span class="sec-n">1</span> Product images</div>
+    <div class="sec-t"><span class="sec-n">1</span> Other stores selling this product <span style="font-weight:400;text-transform:none;color:var(--muted)">(optional)</span></div>
+    <div class="al al-i"><i>💡</i><div>If this product is also listed on other stores/websites, add each one with its store name and link.</div></div>
+    <div id="storeLinksWrap">${storeLinksHTML()}</div>
+    <button class="btn btn-ghost btn-sm" onclick="addStoreLink()" type="button" style="margin-bottom:8px">+ Add another store link</button>
+    <div class="divider"></div>
+    <div class="sec-t"><span class="sec-n">2</span> Product images</div>
     <div class="drop" onclick="document.getElementById('fimg').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="fImgDrop(event)"><input type="file" id="fimg" accept="image/*" multiple onchange="fImgSel(event)"><div style="font-size:26px;margin-bottom:6px">🖼</div><div style="font-size:13px;font-weight:600;color:var(--sub)">Click or drag images</div></div>
     <div class="imgs" id="fimgs">${_formImgs.map((s,i)=>`<div class="imw"><img src="${s}"><div class="x" onclick="rmFImg(${i})">✕</div></div>`).join('')}</div>
     <div class="divider"></div>
-    <div class="sec-t"><span class="sec-n">2</span> Marketing angles — paste as text</div>
+    <div class="sec-t"><span class="sec-n">3</span> Marketing angles — paste as text</div>
     <div class="al al-i"><i>💡</i><div>Paste your angles, one per line. Numbers, dashes & bullets are stripped automatically.</div></div>
     <textarea class="fi" id="p_angles" rows="7" placeholder="1. Fix leaking taps once
 2. Stop water damage
@@ -2202,7 +2253,7 @@ function openProductForm(editId=null){
 ..." oninput="prevA()">${isEdit?(p.angles||[]).join('\n'):''}</textarea>
     <div id="prevA" style="margin-top:10px">${isEdit?prevStatic(p.angles||[],'#'):''}</div>
     <div class="divider"></div>
-    <div class="sec-t"><span class="sec-n">3</span> Hooks — paste as text</div>
+    <div class="sec-t"><span class="sec-n">4</span> Hooks — paste as text</div>
     <div class="al al-i"><i>💡</i><div>Same — paste all hooks, one per line. H01 / H02 prefixes are stripped too.</div></div>
     <textarea class="fi" id="p_hooks" rows="9" placeholder="H01 Your plumber doesn't want you to know
 H02 Leaking pipe at 2AM? Fixed in 10 min
@@ -2212,6 +2263,19 @@ H02 Leaking pipe at 2AM? Fixed in 10 min
   <div class="mf">${isEdit?`<button class="btn btn-bad btn-sm" onclick="delProduct(${editId})">Delete</button>`:''}<button class="btn btn-out" onclick="closeM2()">Cancel</button><button class="btn btn-pri" onclick="saveProduct(${isEdit?editId:'null'})">${isEdit?'Save':'Add product'}</button></div>`;
   openM2();
 }
+let _formStoreLinks=[];
+function storeLinksHTML(){
+  if(!_formStoreLinks.length) return `<div style="color:var(--muted);font-size:12px;margin-bottom:10px">No other store links added yet.</div>`;
+  return _formStoreLinks.map((sl,i)=>`
+    <div style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-start">
+      <input class="fi" style="flex:1" placeholder="Store name (e.g. Storinio, Furaha Deals)" value="${(sl.store||'').replace(/"/g,'&quot;')}" oninput="updStoreLink(${i},'store',this.value)">
+      <input class="fi" style="flex:2" placeholder="https://..." value="${(sl.url||'').replace(/"/g,'&quot;')}" oninput="updStoreLink(${i},'url',this.value)">
+      <button class="btn btn-ghost btn-xs" onclick="rmStoreLink(${i})" type="button" style="margin-top:4px">✕</button>
+    </div>`).join('');
+}
+function addStoreLink(){ _formStoreLinks.push({store:'',url:''}); document.getElementById('storeLinksWrap').innerHTML=storeLinksHTML(); }
+function rmStoreLink(i){ _formStoreLinks.splice(i,1); document.getElementById('storeLinksWrap').innerHTML=storeLinksHTML(); }
+function updStoreLink(i,field,val){ if(_formStoreLinks[i]) _formStoreLinks[i][field]=val; }
 function prevStatic(arr,pfx){ return arr.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${arr.length} detected:</div>`+arr.map((a,i)=>`<div class="pp-item"><span class="pp-n">${pfx==='H'?'H'+String(i+1).padStart(2,'0'):'#'+(i+1)}</span>${a}</div>`).join(''):''; }
 function prevA(){ const l=parseLines(document.getElementById('p_angles').value); document.getElementById('prevA').innerHTML=l.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${l.length} angle(s) detected:</div>`+l.map((a,i)=>`<div class="pp-item"><span class="pp-n">#${i+1}</span>${a}</div>`).join(''):''; }
 function prevH(){ const l=parseLines(document.getElementById('p_hooks').value); document.getElementById('prevH').innerHTML=l.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${l.length} hook(s) detected:</div>`+l.map((h,i)=>`<div class="pp-item"><span class="pp-n">H${String(i+1).padStart(2,'0')}</span>${h}</div>`).join(''):''; }
@@ -2225,24 +2289,27 @@ async function saveProduct(editId){
   const cat=document.getElementById('p_cat').value.trim()||'General';
   const market=document.getElementById('p_market').value;
   const lang=document.getElementById('p_lang').value;
+  const status=document.getElementById('p_status').value;
+  const priority=document.getElementById('p_priority').value;
+  const storeLinks=_formStoreLinks.filter(sl=>sl.store?.trim()||sl.url?.trim());
   const angles=parseLines(document.getElementById('p_angles').value);
   const hooks=parseLines(document.getElementById('p_hooks').value);
   if(!name||!url){ alert('Name and URL required.'); return; }
   if(editId==='null'||editId===null){
-    const row={name,url,cat,market,lang,images:[..._formImgs],angles,hooks,raw_video:''};
+    const row={name,url,cat,market,lang,images:[..._formImgs],angles,hooks,raw_video:'',status,priority,store_links:storeLinks};
     const { data } = await sb.from('products').insert([row]).select().single();
     if(data) APP.products.push(rowToProduct(data));
-    await logHistory('created','product',data?.id||0,`Added product "${name}" (${market}) — ${angles.length} angles, ${hooks.length} hooks`);
+    await logHistory('created','product',data?.id||0,`Added product "${name}" (${market}) — ${angles.length} angles, ${hooks.length} hooks, priority: ${priority}`);
   } else {
     const p=pr(editId);
-    const upd={name,url,cat,market,lang,images:[..._formImgs]};
+    const upd={name,url,cat,market,lang,status,priority,images:[..._formImgs],store_links:storeLinks};
     if(angles.length)upd.angles=angles; if(hooks.length)upd.hooks=hooks;
     await sb.from('products').update(upd).eq('id',editId);
-    p.name=name;p.url=url;p.cat=cat;p.market=market;p.lang=lang;p.images=[..._formImgs];
+    p.name=name;p.url=url;p.cat=cat;p.market=market;p.lang=lang;p.status=status;p.priority=priority;p.images=[..._formImgs];p.storeLinks=storeLinks;
     if(angles.length)p.angles=angles; if(hooks.length)p.hooks=hooks;
-    await logHistory('updated','product',editId,`Edited product "${name}"`);
+    await logHistory('updated','product',editId,`Edited product "${name}" — status: ${status}, priority: ${priority}`);
   }
-  _formImgs=[]; closeM2(); APP.page='products'; render();
+  _formImgs=[]; _formStoreLinks=[]; closeM2(); APP.page='products'; render();
 }
 async function delProduct(id){
   if(!confirm('Delete this product?'))return;
