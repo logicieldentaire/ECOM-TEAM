@@ -362,13 +362,35 @@ async function loadAllData(){
 // ══════════════════════════════════════════════════════════
 const VIDEO_TYPES = ['100% UGC AI VIDEO','AI UGC With Mixed clips','Green Screen Avatar','4 AI Images Slideshow','1 Script 4 Different Hooks','3 AI Generated Scenarios','3 Scripts AI Testimonial'];
 const VOICES = ['English Kenyan Accent','French African Accent','Kenyan Swahili','Tanzanian Swahili','Arabic Moroccan Darija','French General','Arabic Lebanese Accent','English Adam Voice'];
-const MARKET_LIST = ['KENYA','TANZANIA','CONGO KINSHASA','LEBANON','MOROCCO'];
+let MARKET_LIST = ['KENYA','TANZANIA','CONGO KINSHASA','LEBANON','MOROCCO'];
 const STOCK_STATUSES = ['High stock','Medium stock','Low stock','Out of stock','Stop for now — Delivery rate too low'];
 const STOCK_STATUS_STYLE = {
   'High stock':'ok', 'Medium stock':'a', 'Low stock':'w', 'Out of stock':'b', 'Stop for now — Delivery rate too low':'b'
 };
 const PRIORITIES = ['High','Medium','Low'];
 const PRIORITY_STYLE = { High:'b', Medium:'w', Low:'n' };
+
+// ─── Market select with "add new" option ───
+function marketSelectHTML(id, selectedValue){
+  return `<select class="fi" id="${id}" onchange="if(this.value==='__add_new__'){promptNewMarket('${id}')}">
+    ${MARKET_LIST.map(m=>`<option value="${m}" ${selectedValue===m?'selected':''}>${m}</option>`).join('')}
+    <option value="__add_new__" style="font-style:italic">+ Add new market…</option>
+  </select>`;
+}
+function promptNewMarket(selectId){
+  const sel=document.getElementById(selectId);
+  const name=prompt('Enter the new market name (e.g. NIGERIA, UGANDA):');
+  if(name && name.trim()){
+    const clean=name.trim().toUpperCase();
+    if(!MARKET_LIST.includes(clean)) MARKET_LIST.push(clean);
+    // Rebuild the select with the new market selected
+    sel.innerHTML = MARKET_LIST.map(m=>`<option value="${m}" ${m===clean?'selected':''}>${m}</option>`).join('')
+      + `<option value="__add_new__" style="font-style:italic">+ Add new market…</option>`;
+  } else {
+    // Revert to first market if cancelled
+    sel.value = MARKET_LIST[0];
+  }
+}
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const DAY_IDX = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5 };
 
@@ -1214,7 +1236,7 @@ function openTestProductForm(editId=null){
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div class="fg" style="flex:2;min-width:180px"><label class="fl">Product Name <span class="rq">*</span></label><input class="fi" id="tp_name" value="${isEdit?tp.name:''}" placeholder="New product to test"></div>
       <div class="fg" style="flex:1;min-width:120px"><label class="fl">Market <span class="rq">*</span></label>
-        <select class="fi" id="tp_market">${MARKET_LIST.map(m=>`<option ${isEdit&&tp.market===m?'selected':''}>${m}</option>`).join('')}</select>
+        ${marketSelectHTML('tp_market', isEdit?tp.market:MARKET_LIST[0])}
       </div>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
@@ -2224,7 +2246,7 @@ function openProductForm(editId=null){
     </div>
     <div class="fg"><label class="fl">Main product URL <span class="rq">*</span></label><input class="fi" id="p_url" value="${isEdit?p.url:''}" placeholder="harakastore.shop/products/..."></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
-      <div class="fg" style="flex:1;min-width:140px"><label class="fl">Market <span class="rq">*</span></label><select class="fi" id="p_market">${MARKET_LIST.map(m=>`<option ${isEdit&&p.market===m?'selected':''}>${m}</option>`).join('')}</select></div>
+      <div class="fg" style="flex:1;min-width:140px"><label class="fl">Market <span class="rq">*</span></label>${marketSelectHTML('p_market', isEdit?p.market:MARKET_LIST[0])}</div>
       <div class="fg" style="flex:1;min-width:120px"><label class="fl">Ad language</label><select class="fi" id="p_lang">${['English','French','Swahili','Arabic'].map(l=>`<option ${isEdit&&p.lang===l?'selected':''}>${l}</option>`).join('')}</select></div>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
