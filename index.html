@@ -1089,10 +1089,18 @@ function pgProducts(){
   const isPL = me.role==='product_lister';
   const isA  = me.role==='admin';
   const canManage = isA || isPL;
-  const ids = me.role==='media_buyer'?me.products : me.role==='video_editor'?[...new Set(myTasks().map(t=>t.productId))] : APP.products.map(p=>p.id);
+  let ids;
+  if(me.role==='media_buyer') ids = me.products;
+  else if(me.role==='video_editor'){
+    // VE sees every product belonging to any MB they're assigned to as editor, plus any product from existing tasks
+    const myMBs = Object.values(APP.users).filter(u=>u.role==='media_buyer'&&u.ve===me.id);
+    const fromMBs = myMBs.flatMap(mb=>mb.products||[]);
+    const fromTasks = myTasks().map(t=>t.productId);
+    ids = [...new Set([...fromMBs, ...fromTasks])];
+  } else ids = APP.products.map(p=>p.id);
   const prods = canManage ? APP.products : APP.products.filter(p=>ids.includes(p.id));
   return `
-  ${me.role==='video_editor'?`<div class="al al-i"><i>▣</i><div>Your assigned products. Angles &amp; hooks are in <b>English</b>. Use the <b>Raw Clips</b> tab to upload your raw footage once per product.</div></div>`:''}
+  ${me.role==='video_editor'?`<div class="al al-i"><i>▣</i><div>Products assigned to your media buyer(s). Angles &amp; hooks are in <b>English</b>. Use the <b>Raw Clips</b> tab to upload your raw footage once per product.</div></div>`:''}
   ${canManage?`<div style="display:flex;justify-content:flex-end;margin-bottom:16px"><button class="btn btn-pri btn-sm" onclick="openProductForm()">+ Add Product</button></div>`:''}
   <div class="pgrid">
     ${prods.map(p=>{
@@ -2260,10 +2268,35 @@ function openProductModal(pid){
 }
 function prodTab(t,pid){ ['a','h','i','r'].forEach(k=>document.getElementById('pt_'+k).className='tab'+(k===t?' on':'')); document.getElementById('ptc').innerHTML=prodTabContent(t,pid); }
 function prodTabContent(t,pid){
-  const p=pr(pid); const me=u(); const isVE=me.role==='video_editor', isA=me.role==='admin', isPL=me.role==='product_lister';
+  const p=pr(pid); const me=u(); const isVE=me.role==='video_editor', isA=me.role==='admin', isPL=me.role==='product_lister', isMB=me.role==='media_buyer';
   const canManage = isA || isPL;
-  if(t==='a') return p.angles.map((a,i)=>`<div class="pp-item"><span class="pp-n">#${i+1}</span>${a}</div>`).join('')||'<div class="empty"><div class="empty-t">No angles</div></div>';
-  if(t==='h') return p.hooks.map((h,i)=>`<div class="pp-item"><span class="pp-n">H${String(i+1).padStart(2,'0')}</span>${h}</div>`).join('')||'<div class="empty"><div class="empty-t">No hooks</div></div>';
+  const canEditContent = canManage || isMB; // MB can also add/edit angles & hooks directly, not just view
+
+  if(t==='a'){
+    if(canEditContent){
+      return `
+        <div class="al al-i"><i>💡</i><div>Paste angles, one per line — numbers, dashes &amp; bullets stripped automatically. Saves directly, no need to open Edit.</div></div>
+        <textarea class="fi" id="inline_angles_${pid}" rows="8" placeholder="1. Fix leaking taps once
+2. Stop water damage
+- Waterproof seal
+...">${(p.angles||[]).join('\n')}</textarea>
+        <button class="btn btn-pri btn-sm" style="margin-top:10px" onclick="saveInlineAngles(${pid})">Save angles</button>
+      `;
+    }
+    return p.angles.map((a,i)=>`<div class="pp-item"><span class="pp-n">#${i+1}</span>${a}</div>`).join('')||'<div class="empty"><div class="empty-t">No angles</div></div>';
+  }
+  if(t==='h'){
+    if(canEditContent){
+      return `
+        <div class="al al-i"><i>💡</i><div>Paste hooks, one per line — H01/H02 prefixes stripped automatically. Saves directly, no need to open Edit.</div></div>
+        <textarea class="fi" id="inline_hooks_${pid}" rows="10" placeholder="H01 Your plumber doesn't want you to know
+H02 Leaking pipe at 2AM? Fixed in 10 min
+...">${(p.hooks||[]).join('\n')}</textarea>
+        <button class="btn btn-pri btn-sm" style="margin-top:10px" onclick="saveInlineHooks(${pid})">Save hooks</button>
+      `;
+    }
+    return p.hooks.map((h,i)=>`<div class="pp-item"><span class="pp-n">H${String(i+1).padStart(2,'0')}</span>${h}</div>`).join('')||'<div class="empty"><div class="empty-t">No hooks</div></div>';
+  }
   if(t==='i'){
     const imgs=p.images||[];
     return `${canManage?`<div class="drop" onclick="document.getElementById('pimg_${pid}').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="pImgDrop(event,${pid})"><input type="file" id="pimg_${pid}" accept="image/*" multiple onchange="pImgSel(event,${pid})"><div style="font-size:26px;margin-bottom:6px">🖼</div><div style="font-size:13px;font-weight:600;color:var(--sub)">Click or drag images</div></div>`:''}
@@ -2280,6 +2313,22 @@ function prodTabContent(t,pid){
       </div>
       ${isVE||canManage?`<div class="divider"></div><div class="fg"><label class="fl">${isVE?'Upload your raw clips link (one-time)':'Edit raw clips link'}</label><input class="fi" id="raw_${pid}" placeholder="https://drive.google.com/drive/folders/..." value="${p.rawVideo||''}"></div><button class="btn btn-pri btn-sm" onclick="saveRaw(${pid})">Save link</button>${has?`<button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="APP.products.find(x=>x.id===${pid}).rawVideo='';prodTab('r',${pid});render()">Remove</button>`:''}`:''}`;
   }
+}
+async function saveInlineAngles(pid){
+  const angles=parseLines(document.getElementById('inline_angles_'+pid).value);
+  const p=pr(pid); p.angles=angles;
+  await sb.from('products').update({angles}).eq('id',pid);
+  await logHistory('updated','product',pid,`Updated angles for "${p.name}" (${angles.length} angles)`);
+  document.getElementById('pt_a').textContent='🎯 '+angles.length+' Angles';
+  render();
+}
+async function saveInlineHooks(pid){
+  const hooks=parseLines(document.getElementById('inline_hooks_'+pid).value);
+  const p=pr(pid); p.hooks=hooks;
+  await sb.from('products').update({hooks}).eq('id',pid);
+  await logHistory('updated','product',pid,`Updated hooks for "${p.name}" (${hooks.length} hooks)`);
+  document.getElementById('pt_h').textContent='🪝 '+hooks.length+' Hooks';
+  render();
 }
 function pImgSel(e,pid){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=async ev=>{const p=pr(pid);if(!p.images)p.images=[];p.images.push(ev.target.result);await sb.from('products').update({images:p.images}).eq('id',pid);prodTab('i',pid);document.getElementById('pt_i').textContent='🖼 Images ('+p.images.length+')';};r.readAsDataURL(f);}); }
 function pImgDrop(e,pid){ e.preventDefault(); pImgSel({target:{files:e.dataTransfer.files}},pid); }
