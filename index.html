@@ -2154,14 +2154,73 @@ async function delUser(id){
 // ══════════════════════════════════════════════════════════
 // MODAL: ASSIGN PRODUCT
 // ══════════════════════════════════════════════════════════
+let _assignSel = []; // currently checked product IDs in the assign-products modal
 function openAssignProd(mbId){
   const mb=APP.users[mbId];
   const avail=APP.products.filter(p=>!mb.products.includes(p.id));
+  _assignSel = [];
   document.getElementById('md2').innerHTML=`
-  <div class="mh"><div class="mt">Assign products to ${mb.name}</div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
-  <div class="mb">${avail.length?`<div class="pgrid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))">${avail.map(p=>`<div class="pcard" style="cursor:pointer" onclick="addProd('${mbId}',${p.id});closeM2();render()"><div class="pcard-b"><div class="pcard-n" style="font-size:13px">${p.name}</div>${mchip(p.market)}<div style="font-size:11px;color:var(--muted);margin-top:6px">${p.cat}</div></div></div>`).join('')}</div>`:`<div class="al al-ok"><i>✓</i><div>All products already assigned.</div></div>`}</div>
-  <div class="mf"><button class="btn btn-out" onclick="closeM2()">Close</button></div>`;
+  <div class="mh"><div><div class="mt">Assign products to ${mb.name}</div><div class="ms">Select one or more products, or use Select All</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
+  <div class="mb">
+    ${avail.length?`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
+        <input type="checkbox" id="assignSelectAll" onchange="toggleSelectAllProd(${JSON.stringify(avail.map(p=>p.id))})" style="width:16px;height:16px;cursor:pointer">
+        Select all (${avail.length})
+      </label>
+      <div id="assignCountLabel" style="font-size:12px;color:var(--muted)">0 selected</div>
+    </div>
+    <div class="pgrid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr))" id="assignGrid">
+      ${avail.map(p=>`
+        <div class="pcard" style="cursor:pointer;position:relative" onclick="toggleAssignProd(${p.id})" id="apcard_${p.id}">
+          <input type="checkbox" id="apchk_${p.id}" onclick="event.stopPropagation();toggleAssignProd(${p.id})" style="position:absolute;top:10px;right:10px;width:16px;height:16px;cursor:pointer;z-index:2">
+          <div class="pcard-b">
+            <div class="pcard-n" style="font-size:13px;padding-right:20px">${p.name}</div>
+            ${mchip(p.market)}
+            <div style="font-size:11px;color:var(--muted);margin-top:6px">${p.cat}</div>
+          </div>
+        </div>`).join('')}
+    </div>`:`<div class="al al-ok"><i>✓</i><div>All products already assigned.</div></div>`}
+  </div>
+  <div class="mf"><button class="btn btn-out" onclick="closeM2()">Cancel</button>${avail.length?`<button class="btn btn-pri" id="assignSaveBtn" onclick="saveAssignedProds('${mbId}')" disabled>Assign 0 product(s)</button>`:''}</div>`;
   openM2();
+}
+function toggleAssignProd(pid){
+  const idx=_assignSel.indexOf(pid);
+  const card=document.getElementById('apcard_'+pid);
+  const chk=document.getElementById('apchk_'+pid);
+  if(idx>=0){ _assignSel.splice(idx,1); card.style.borderColor='var(--border)'; card.style.background='#fff'; chk.checked=false; }
+  else { _assignSel.push(pid); card.style.borderColor='var(--accent)'; card.style.background='var(--accent-bg)'; chk.checked=true; }
+  updateAssignUI();
+}
+function toggleSelectAllProd(allIds){
+  const allChecked=document.getElementById('assignSelectAll').checked;
+  _assignSel = allChecked ? [...allIds] : [];
+  allIds.forEach(pid=>{
+    const card=document.getElementById('apcard_'+pid);
+    const chk=document.getElementById('apchk_'+pid);
+    if(card&&chk){
+      chk.checked=allChecked;
+      card.style.borderColor=allChecked?'var(--accent)':'var(--border)';
+      card.style.background=allChecked?'var(--accent-bg)':'#fff';
+    }
+  });
+  updateAssignUI();
+}
+function updateAssignUI(){
+  const n=_assignSel.length;
+  const lbl=document.getElementById('assignCountLabel'); if(lbl) lbl.textContent=`${n} selected`;
+  const btn=document.getElementById('assignSaveBtn');
+  if(btn){ btn.disabled = n===0; btn.textContent = `Assign ${n} product(s)`; }
+}
+async function saveAssignedProds(mbId){
+  if(!_assignSel.length) return;
+  const mb=APP.users[mbId];
+  _assignSel.forEach(pid=>{ if(!mb.products.includes(pid)) mb.products.push(pid); });
+  await sb.from('users').update({products:mb.products}).eq('id',mbId);
+  await logHistory('updated','user',mbId,`Assigned ${_assignSel.length} product(s) to ${mb.name}`);
+  _assignSel=[];
+  closeM2(); render();
 }
 async function addProd(mb,pid){ if(!APP.users[mb].products.includes(pid)){APP.users[mb].products.push(pid); await sb.from('users').update({products:APP.users[mb].products}).eq('id',mb);} }
 async function rmProd(mb,pid){ APP.users[mb].products=APP.users[mb].products.filter(i=>i!==pid); await sb.from('users').update({products:APP.users[mb].products}).eq('id',mb); render(); }
