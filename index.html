@@ -395,11 +395,10 @@ const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const DAY_IDX = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5 };
 
 // ─── Real-date helpers ───
-function toYMD(d){ return d.toISOString().slice(0,10); }
-function todayYMD(){
-  const d=new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-}
+// IMPORTANT: always use LOCAL date components, never toISOString() (which shifts to UTC
+// and silently rolls the date backward/forward by a day depending on timezone).
+function toYMD(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function todayYMD(){ return toYMD(new Date()); }
 function isoWeek(d){
   const tmp=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
   tmp.setUTCDate(tmp.getUTCDate()+4-(tmp.getUTCDay()||7));
@@ -463,6 +462,11 @@ let APP = {
 // ══════════════════════════════════════════════════════════
 // HELPERS
 // ══════════════════════════════════════════════════════════
+// Escape HTML special chars so user-entered text never breaks the DOM structure
+function escHtml(str){
+  if(str===null||str===undefined) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
 const u = ()=>APP.users[APP.me];
 const pr = id=>APP.products.find(p=>p.id===id);
 const tk = id=>APP.tasks.find(t=>t.id===id);
@@ -1021,7 +1025,7 @@ function pgReports(){
   const me=u();
   const isMB=me.role==='media_buyer';
   const mbs = isMB ? [me] : Object.values(APP.users).filter(x=>x.role==='media_buyer');
-  const monthKey = new Date().toISOString().slice(0,7);
+  const monthKey = todayYMD().slice(0,7);
   // Filter state stored in APP.reportFilter (null = all)
   if(!APP.reportFilter) APP.reportFilter = '';
 
@@ -1382,7 +1386,7 @@ function pgStats(){
         <div><div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px">From date</div><input type="date" class="fi" style="width:auto;padding:6px 10px;font-size:12px" value="${f.from}" onchange="APP.statsFilter.from=this.value;render()"></div>
         <div><div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px">To date</div><input type="date" class="fi" style="width:auto;padding:6px 10px;font-size:12px" value="${f.to}" onchange="APP.statsFilter.to=this.value;render()"></div>
         <button class="btn btn-ghost btn-sm" onclick="APP.statsFilter.from='${weekStartOf(todayYMD())}';APP.statsFilter.to='${todayYMD()}';render()">This week</button>
-        <button class="btn btn-ghost btn-sm" onclick="APP.statsFilter.from='${new Date().toISOString().slice(0,7)}-01';APP.statsFilter.to='${todayYMD()}';render()">This month</button>
+        <button class="btn btn-ghost btn-sm" onclick="APP.statsFilter.from='${todayYMD().slice(0,7)}-01';APP.statsFilter.to='${todayYMD()}';render()">This month</button>
         ${(f.from||f.to)?`<button class="btn btn-ghost btn-sm" onclick="APP.statsFilter.from='';APP.statsFilter.to='';render()">Clear</button>`:''}
       </div>
       <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px">Show KPIs</div>
@@ -1646,7 +1650,7 @@ function openTask(id){
     <div class="sec-t"><span class="sec-n">1</span> Creative brief</div>
     <div style="background:var(--s50);border-radius:10px;padding:13px;margin-bottom:16px">
       <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Angle (shared across all hook variants)</div>
-      <div style="font-size:13px;margin-bottom:11px;line-height:1.5">${t.angle}</div>
+      ${canMB||isA?`<textarea class="fi" id="tangle" rows="2" style="margin-bottom:11px">${escHtml(t.angle)}</textarea>`:`<div style="font-size:13px;margin-bottom:11px;line-height:1.5">${t.angle}</div>`}
       <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Format · Voice</div>
       <div style="font-size:13px">${t.videoType} · ${t.voiceOver}</div>
     </div>
@@ -1663,7 +1667,7 @@ function openTask(id){
     ${(canVE||isA)&&variants.length<4?`<div id="addVariantWrap"><button class="btn btn-ghost btn-sm" onclick="addVariant()" style="margin-bottom:8px">+ Add another hook variant (${variants.length}/4)</button></div>`:'<div id="addVariantWrap"></div>'}
 
     <div class="fg" style="margin-top:6px"><label class="fl">Overall task status</label>
-      <select class="fi" id="tst" ${!canVE&&!isA?'disabled':''}>
+      <select class="fi" id="tst" ${!canVE&&!canMB&&!isA?'disabled':''}>
         ${['pending','in_progress','done','in_revision'].map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${{pending:'Pending',in_progress:'In progress',done:'Done',in_revision:'In revision'}[s]}</option>`).join('')}
       </select>
       ${canVE||isA?`<div style="font-size:11px;color:var(--muted);margin-top:5px">Marking "Done" with at least one video link records upload time(s) for pointage.</div>`:''}
@@ -1675,7 +1679,10 @@ function openTask(id){
       <button class="btn btn-bad btn-sm" style="margin-top:8px" onclick="sendRevision(${t.id})">⟲ Send back for revision</button>
     `:''}
   </div>
-  <div class="mf"><button class="btn btn-out" onclick="closeM1()">Cancel</button><button class="btn btn-pri" onclick="saveTask(${t.id})">Save</button></div>`;
+  <div class="mf">
+    ${(canMB||isA)?`<button class="btn btn-bad btn-sm" onclick="delTask(${t.id})" style="margin-right:auto">Delete task</button>`:''}
+    <button class="btn btn-out" onclick="closeM1()">Cancel</button><button class="btn btn-pri" onclick="saveTask(${t.id})">Save</button>
+  </div>`;
   openM1();
 }
 
@@ -1764,6 +1771,7 @@ async function saveTask(id){
   const t=tk(id);
   const st=document.getElementById('tst')?.value||t.status;
   const mbNote=document.getElementById('tmbn')?.value?.trim();
+  const angle=document.getElementById('tangle')?.value?.trim();
   const variants=APP.selTask.variants.map(v=>({...v}));
   if(st==='done'){
     variants.forEach(v=>{ if(v.videoLink&&v.videoLink.trim()&&!v.uploadedAt) v.uploadedAt=new Date().toISOString(); });
@@ -1771,8 +1779,18 @@ async function saveTask(id){
   variants.forEach(v=>{ if(v.revisionLink&&v.revisionLink.trim()&&!v.revisionUploadedAt) v.revisionUploadedAt=new Date().toISOString(); });
   const patch={ status:st, variants };
   if(mbNote!==undefined) patch.mbNote=mbNote;
+  if(angle) patch.angle=angle;
   await updTask(id, patch);
   await logHistory('updated', 'task', id, `Updated task for ${pr(t.productId)?.name||t.testProductName||'product'} — status: ${st}`);
+  closeM1(); render();
+}
+async function delTask(id){
+  const t=tk(id); if(!t)return;
+  if(!confirm('Delete this task permanently? This cannot be undone.')) return;
+  const name=pr(t.productId)?.name||t.testProductName||'product';
+  APP.tasks=APP.tasks.filter(x=>x.id!==id);
+  await sb.from('tasks').delete().eq('id',id);
+  await logHistory('deleted','task',id,`Deleted task for "${name}" (${t.taskDate})`);
   closeM1(); render();
 }
 async function sendRevision(id){
@@ -1995,7 +2013,7 @@ function openReportModal(){
   const me=u();
   const scalingProds=APP.products.filter(p=>me.products.includes(p.id));
   const testProds=APP.testProducts.filter(p=>p.assignedMBs?.includes(APP.me));
-  const today=new Date().toISOString().slice(0,10);
+  const today=todayYMD();
   document.getElementById('md1').innerHTML=`
   <div class="mh"><div><div class="mt">Add Daily Report</div><div class="ms">CPL is calculated automatically</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
   <div class="mb">
@@ -2279,11 +2297,11 @@ function prodTabContent(t,pid){
         <textarea class="fi" id="inline_angles_${pid}" rows="8" placeholder="1. Fix leaking taps once
 2. Stop water damage
 - Waterproof seal
-...">${(p.angles||[]).join('\n')}</textarea>
+...">${escHtml((p.angles||[]).join('\n'))}</textarea>
         <button class="btn btn-pri btn-sm" style="margin-top:10px" onclick="saveInlineAngles(${pid})">Save angles</button>
       `;
     }
-    return p.angles.map((a,i)=>`<div class="pp-item"><span class="pp-n">#${i+1}</span>${a}</div>`).join('')||'<div class="empty"><div class="empty-t">No angles</div></div>';
+    return p.angles.map((a,i)=>`<div class="pp-item"><span class="pp-n">#${i+1}</span>${escHtml(a)}</div>`).join('')||'<div class="empty"><div class="empty-t">No angles</div></div>';
   }
   if(t==='h'){
     if(canEditContent){
@@ -2291,11 +2309,11 @@ function prodTabContent(t,pid){
         <div class="al al-i"><i>💡</i><div>Paste hooks, one per line — H01/H02 prefixes stripped automatically. Saves directly, no need to open Edit.</div></div>
         <textarea class="fi" id="inline_hooks_${pid}" rows="10" placeholder="H01 Your plumber doesn't want you to know
 H02 Leaking pipe at 2AM? Fixed in 10 min
-...">${(p.hooks||[]).join('\n')}</textarea>
+...">${escHtml((p.hooks||[]).join('\n'))}</textarea>
         <button class="btn btn-pri btn-sm" style="margin-top:10px" onclick="saveInlineHooks(${pid})">Save hooks</button>
       `;
     }
-    return p.hooks.map((h,i)=>`<div class="pp-item"><span class="pp-n">H${String(i+1).padStart(2,'0')}</span>${h}</div>`).join('')||'<div class="empty"><div class="empty-t">No hooks</div></div>';
+    return p.hooks.map((h,i)=>`<div class="pp-item"><span class="pp-n">H${String(i+1).padStart(2,'0')}</span>${escHtml(h)}</div>`).join('')||'<div class="empty"><div class="empty-t">No hooks</div></div>';
   }
   if(t==='i'){
     const imgs=p.images||[];
@@ -2380,14 +2398,14 @@ function openProductForm(editId=null){
     <textarea class="fi" id="p_angles" rows="7" placeholder="1. Fix leaking taps once
 2. Stop water damage
 - Waterproof seal
-..." oninput="prevA()">${isEdit?(p.angles||[]).join('\n'):''}</textarea>
+..." oninput="prevA()">${isEdit?escHtml((p.angles||[]).join('\n')):''}</textarea>
     <div id="prevA" style="margin-top:10px">${isEdit?prevStatic(p.angles||[],'#'):''}</div>
     <div class="divider"></div>
     <div class="sec-t"><span class="sec-n">4</span> Hooks — paste as text</div>
     <div class="al al-i"><i>💡</i><div>Same — paste all hooks, one per line. H01 / H02 prefixes are stripped too.</div></div>
     <textarea class="fi" id="p_hooks" rows="9" placeholder="H01 Your plumber doesn't want you to know
 H02 Leaking pipe at 2AM? Fixed in 10 min
-..." oninput="prevH()">${isEdit?(p.hooks||[]).join('\n'):''}</textarea>
+..." oninput="prevH()">${isEdit?escHtml((p.hooks||[]).join('\n')):''}</textarea>
     <div id="prevH" style="margin-top:10px">${isEdit?prevStatic(p.hooks||[],'H'):''}</div>
   </div>
   <div class="mf">${isEdit?`<button class="btn btn-bad btn-sm" onclick="delProduct(${editId})">Delete</button>`:''}<button class="btn btn-out" onclick="closeM2()">Cancel</button><button class="btn btn-pri" onclick="saveProduct(${isEdit?editId:'null'})">${isEdit?'Save':'Add product'}</button></div>`;
@@ -2406,9 +2424,9 @@ function storeLinksHTML(){
 function addStoreLink(){ _formStoreLinks.push({store:'',url:''}); document.getElementById('storeLinksWrap').innerHTML=storeLinksHTML(); }
 function rmStoreLink(i){ _formStoreLinks.splice(i,1); document.getElementById('storeLinksWrap').innerHTML=storeLinksHTML(); }
 function updStoreLink(i,field,val){ if(_formStoreLinks[i]) _formStoreLinks[i][field]=val; }
-function prevStatic(arr,pfx){ return arr.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${arr.length} detected:</div>`+arr.map((a,i)=>`<div class="pp-item"><span class="pp-n">${pfx==='H'?'H'+String(i+1).padStart(2,'0'):'#'+(i+1)}</span>${a}</div>`).join(''):''; }
-function prevA(){ const l=parseLines(document.getElementById('p_angles').value); document.getElementById('prevA').innerHTML=l.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${l.length} angle(s) detected:</div>`+l.map((a,i)=>`<div class="pp-item"><span class="pp-n">#${i+1}</span>${a}</div>`).join(''):''; }
-function prevH(){ const l=parseLines(document.getElementById('p_hooks').value); document.getElementById('prevH').innerHTML=l.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${l.length} hook(s) detected:</div>`+l.map((h,i)=>`<div class="pp-item"><span class="pp-n">H${String(i+1).padStart(2,'0')}</span>${h}</div>`).join(''):''; }
+function prevStatic(arr,pfx){ return arr.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${arr.length} detected:</div>`+arr.map((a,i)=>`<div class="pp-item"><span class="pp-n">${pfx==='H'?'H'+String(i+1).padStart(2,'0'):'#'+(i+1)}</span>${escHtml(a)}</div>`).join(''):''; }
+function prevA(){ const l=parseLines(document.getElementById('p_angles').value); document.getElementById('prevA').innerHTML=l.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${l.length} angle(s) detected:</div>`+l.map((a,i)=>`<div class="pp-item"><span class="pp-n">#${i+1}</span>${escHtml(a)}</div>`).join(''):''; }
+function prevH(){ const l=parseLines(document.getElementById('p_hooks').value); document.getElementById('prevH').innerHTML=l.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${l.length} hook(s) detected:</div>`+l.map((h,i)=>`<div class="pp-item"><span class="pp-n">H${String(i+1).padStart(2,'0')}</span>${escHtml(h)}</div>`).join(''):''; }
 function fImgSel(e){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>{_formImgs.push(ev.target.result);fGrid();};r.readAsDataURL(f);}); }
 function fImgDrop(e){ e.preventDefault(); fImgSel({target:{files:e.dataTransfer.files}}); }
 function fGrid(){ document.getElementById('fimgs').innerHTML=_formImgs.map((s,i)=>`<div class="imw"><img src="${s}"><div class="x" onclick="rmFImg(${i})">✕</div></div>`).join(''); }
