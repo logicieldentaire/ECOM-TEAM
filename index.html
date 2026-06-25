@@ -536,14 +536,8 @@ function taskUploadedCount(t){
   if(!t.variants) return t.uploadedAt?1:0;
   return t.variants.filter(v=>v.uploadedAt).length;
 }
-function taskWinnerCount(t){
-  if(!t.variants) return t.mbResult==='winner'?1:0;
-  return t.variants.filter(v=>v.mbResult==='winner').length;
-}
-function taskLoserCount(t){
-  if(!t.variants) return t.mbResult==='loser'?1:0;
-  return t.variants.filter(v=>v.mbResult==='loser').length;
-}
+function taskWinnerCount(t){ return (t.variants||[]).filter(v=>v.adResult==='winner').length; }
+function taskLoserCount(t){ return (t.variants||[]).filter(v=>v.adResult==='loser').length; }
 function taskHasWinner(t){ return taskWinnerCount(t)>0; }
 function taskHasFeedback(t){
   return t.variants&&t.variants.some(v=>v.mbFeedback||v.revisionFeedback);
@@ -1726,13 +1720,35 @@ function variantCard(v,i,canVE,canMB,isA,t){
   if(!v.videoLink){
     reviewBlock = '<div class="al al-i" style="margin-bottom:0"><i>&#9711;</i><div>Waiting for video link from editor.</div></div>';
   } else if(canMB||isA){
+    // ── Section 1: Production review (Approve / Needs revision) ──
     const approveBtn = '<button class="btn btn-sm '+(isApproved?'btn-pri':'btn-out')+'" type="button" onclick="setVariantResult('+i+',\'approved\')">&#10003; Approve</button>';
     const revisionBtn = '<button class="btn btn-sm '+(inRevision?'btn-bad':'btn-out')+'" type="button" onclick="setVariantResult('+i+',\'needs_revision\')">&#8634; Needs revision</button>';
     const resetBtn = (isApproved||inRevision) ? '<button class="btn btn-ghost btn-sm" type="button" onclick="setVariantResult('+i+',\'pending\')">Reset</button>' : '';
-    const feedbackField = inRevision
-      ? '<div class="fg" style="margin-bottom:0"><label class="fl" style="color:var(--warn)">Revision feedback</label><textarea class="fi" data-vfield="revisionFeedback" data-vidx="'+i+'" rows="2" placeholder="e.g. Show product in first 3 sec, add subtitle...">'+escHtml(v.revisionFeedback||'')+'</textarea></div>'
-      : '<div class="fg" style="margin-bottom:0"><label class="fl">Optional note</label><textarea class="fi" data-vfield="mbFeedback" data-vidx="'+i+'" rows="2" placeholder="Optional feedback...">'+escHtml(v.mbFeedback||'')+'</textarea></div>';
-    reviewBlock = '<div style="margin-bottom:10px"><label class="fl">Review this version</label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+approveBtn+revisionBtn+resetBtn+'</div></div>'+feedbackField;
+    const revisionFeedbackField = inRevision
+      ? '<div class="fg" style="margin-bottom:0"><label class="fl" style="color:var(--warn)">Revision feedback <span style="font-weight:400;color:var(--muted)">(explain what to fix)</span></label><textarea class="fi" data-vfield="revisionFeedback" data-vidx="'+i+'" rows="2" placeholder="e.g. Show product in first 3 sec, add subtitle...">'+escHtml(v.revisionFeedback||'')+'</textarea></div>'
+      : '';
+    const generalFeedback = !inRevision
+      ? '<div class="fg" style="margin-bottom:0"><label class="fl">Feedback of this video version</label><textarea class="fi" data-vfield="mbFeedback" data-vidx="'+i+'" rows="2" placeholder="Optional feedback on this video version...">'+escHtml(v.mbFeedback||'')+'</textarea></div>'
+      : '';
+
+    // ── Section 2: Ad performance (Winner / Loser / Pending) — shown to all ──
+    const adResult = v.adResult||'pending';
+    const winnerBtn = '<button class="btn btn-sm '+(adResult==='winner'?'btn-pri':'btn-out')+'" type="button" onclick="setVariantAdResult('+i+',\'winner\')">Winner</button>';
+    const loserBtn  = '<button class="btn btn-sm '+(adResult==='loser'?'btn-bad':'btn-out')+'"  type="button" onclick="setVariantAdResult('+i+',\'loser\')">Loser</button>';
+    const pendingBtn= '<button class="btn btn-sm '+(adResult==='pending'?'on2':'btn-ghost')+'" type="button" onclick="setVariantAdResult('+i+',\'pending\')">Pending</button>';
+    const adResultChip = adResult==='winner'?'<span class="chip chip-ok" style="font-size:10px">Winner</span>':adResult==='loser'?'<span class="chip chip-b" style="font-size:10px">Loser</span>':'';
+
+    const adPerformanceBlock = '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">'
+      +'<label class="fl">Ad performance result <span style="font-weight:400;color:var(--muted);font-size:10px">(after launching in ads)</span> '+adResultChip+'</label>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap">'+winnerBtn+loserBtn+pendingBtn+'</div>'
+      +'</div>';
+
+    reviewBlock = '<div style="margin-bottom:10px"><label class="fl">Production review</label>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">'+approveBtn+revisionBtn+resetBtn+'</div>'
+      +'</div>'
+      +revisionFeedbackField
+      +generalFeedback
+      +adPerformanceBlock;
   }
   return '<div class="card" style="margin-bottom:10px;border:1.5px solid '+borderColor+'">'
     +'<div class="card-h" style="padding:10px 14px;background:'+headerBg+'">'
@@ -1752,7 +1768,7 @@ function addVariant(){
   if(!APP.selTask.variants) APP.selTask.variants=[];
   if(APP.selTask.variants.length>=4) return;
   syncVariantsFromDOM();
-  APP.selTask.variants.push({hook:'',videoLink:'',mbResult:'pending',mbFeedback:'',uploadedAt:null});
+  APP.selTask.variants.push({hook:'',videoLink:'',mbResult:'pending',mbFeedback:'',adResult:'pending',uploadedAt:null});
   renderTaskModalBody();
 }
 function removeVariant(i){
@@ -1770,6 +1786,11 @@ function syncVariantsFromDOM(){
 function setVariantResult(i,r){
   syncVariantsFromDOM();
   APP.selTask.variants[i].mbResult=r;
+  renderTaskModalBody();
+}
+function setVariantAdResult(i,r){
+  syncVariantsFromDOM();
+  APP.selTask.variants[i].adResult=r;
   renderTaskModalBody();
 }
 // Re-render only the variants list + add-button area from current APP.selTask (no data mutation)
@@ -2414,8 +2435,9 @@ function prodTabContent(t,pid){
               </div>
               <div style="display:flex;gap:6px;align-items:center">
                 ${v.mbResult==='approved'?chip('Approved','ok'):v.mbResult==='needs_revision'?chip('Revision','w'):''}
-                <a href="${v.videoLink}" target="_blank" class="btn btn-out btn-xs">Video ↗</a>
-                ${v.revisionLink?`<a href="${v.revisionLink}" target="_blank" class="btn btn-ghost btn-xs">Revised ↗</a>`:''}
+                ${v.adResult==='winner'?chip('Winner','ok'):v.adResult==='loser'?chip('Loser','b'):''}
+                <a href="${v.videoLink}" target="_blank" class="btn btn-out btn-xs">Video &#8599;</a>
+                ${v.revisionLink?`<a href="${v.revisionLink}" target="_blank" class="btn btn-ghost btn-xs">Revised &#8599;</a>`:''}
               </div>
             </div>`).join('')}
         </div>`).join('')}`;
