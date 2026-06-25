@@ -307,7 +307,7 @@ function hideLoader(){ document.getElementById('loadingOverlay').style.display='
 
 // ─── Row → APP format converters ───
 function rowToUser(r){ return { id:r.id, name:r.name, role:r.role, av:r.av, email:r.email, pwd:r.pwd, products:r.products||[], ve:r.ve||null, active:r.active, perms:r.perms||{} }; }
-function rowToProduct(r){ return { id:r.id, name:r.name, market:r.market, lang:r.lang, cat:r.cat, url:r.url, images:r.images||[], angles:r.angles||[], hooks:r.hooks||[], rawVideo:r.raw_video||'', status:r.status||'High stock', priority:r.priority||'Medium', storeLinks:r.store_links||[] }; }
+function rowToProduct(r){ return { id:r.id, name:r.name, market:r.market, lang:r.lang, cat:r.cat, url:r.url, images:r.images||[], angles:r.angles||[], hooks:r.hooks||[], rawVideo:r.raw_video||'', status:r.status||'High stock', priority:r.priority||'Medium', storeLinks:r.store_links||[], adImagesLink:r.ad_images_link||'' }; }
 function rowToTestProduct(r){ return { id:r.id, name:r.name, url:r.url, market:r.market, lang:r.lang, notes:r.notes||'', assignedMBs:r.assigned_mbs||[], status:r.status||'testing', testResults:r.test_results||[], images:r.images||[], createdAt:r.created_at }; }
 function rowToTask(r){ return { id:r.id, productId:r.product_id, testProductId:r.test_product_id, taskDate:r.task_date, day:r.day, assignedMB:r.assigned_mb, assignedVE:r.assigned_ve, campaignType:r.campaign_type, videoType:r.video_type, voiceOver:r.voice_over, angle:r.angle, variants:r.variants||[], status:r.status, revisionNote:r.revision_note||'', mbNote:r.mb_note||'', managerApproval:r.manager_approval||'pending', deadlineDate:r.deadline_date, isTest:r.is_test||false, testProductName:r.test_product_name||'', testMarket:r.test_market||'', createdAt:r.created_at, updatedAt:r.updated_at }; }
 function rowToReport(r){ return { id:r.id, mbId:r.mb_id, productId:r.product_id, date:r.date, spend:r.spend, leads:r.leads, cpl:r.cpl }; }
@@ -510,7 +510,7 @@ async function logHistory(action, entity, entityId, description){
 function av(id,sz=28){ const x=APP.users[id]; if(!x)return ''; return `<div class="av" style="background:${col(id)};width:${sz}px;height:${sz}px;font-size:${Math.max(9,Math.round(sz*.34))}px;border-radius:${Math.round(sz*.25)}px">${x.av}</div>`; }
 function chip(t,c='n'){ return `<span class="chip chip-${c}">${t}</span>`; }
 function mchip(m){ return `<span class="chip chip-n"><span class="dot" style="background:${col('youssef')}"></span>${m}</span>`; }
-function sChip(s){ const m={done:'ok',in_progress:'a',in_revision:'w',pending:'n'}; const l={done:'Done',in_progress:'In progress',in_revision:'Revision',pending:'Pending'}; return chip(l[s]||'Pending', m[s]||'n'); }
+function sChip(s){ const m={done:'ok',in_progress:'a',in_revision:'w',pending:'n',approved:'ok'}; const l={done:'Done',in_progress:'In progress',in_revision:'Revision',pending:'Pending',approved:'Approved'}; return chip(l[s]||'Pending', m[s]||'n'); }
 function rChip(r){ const m={winner:'ok',loser:'b',pending:'n'}; const l={winner:'Winner',loser:'Loser',pending:'Pending'}; return chip(l[r]||'Pending', m[r]||'n'); }
 function fmtDateTime(iso){ if(!iso)return '—'; const d=new Date(iso); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}); }
 function fmtDate(iso){ if(!iso)return '—'; return new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
@@ -518,7 +518,11 @@ function isLate(t){
   if(!t.deadlineDate) return null;
   const upl = taskLatestUpload(t);
   if(!upl) return null;
-  const dl = new Date(t.deadlineDate); dl.setHours(23,59,59);
+  // deadline = end of the deadline day in LOCAL time (23:59:59)
+  // deadlineDate is stored as ISO string; we extract YYYY-MM-DD and set end-of-day locally
+  const deadlineYMD = (t.deadlineDate||'').slice(0,10);
+  if(!deadlineYMD) return null;
+  const dl = new Date(deadlineYMD+'T23:59:59');
   return new Date(upl) > dl;
 }
 
@@ -541,12 +545,19 @@ function taskLoserCount(t){
   return t.variants.filter(v=>v.mbResult==='loser').length;
 }
 function taskHasWinner(t){ return taskWinnerCount(t)>0; }
+function taskHasFeedback(t){
+  return t.variants&&t.variants.some(v=>v.mbFeedback||v.revisionFeedback);
+}
 function taskOverallResult(t){
-  // For chip display: winner if any variant won, loser if all reviewed and lost, else pending
-  if(taskHasWinner(t)) return 'winner';
   if(!t.variants||!t.variants.length) return t.mbResult||'pending';
-  const allReviewed = t.variants.every(v=>v.mbResult!=='pending');
-  if(allReviewed && t.variants.every(v=>v.mbResult==='loser')) return 'loser';
+  const varWithVideo = t.variants.filter(v=>v.videoLink);
+  if(!varWithVideo.length) return 'pending';
+  if(varWithVideo.every(v=>v.mbResult==='approved')) return 'approved';
+  if(varWithVideo.some(v=>v.mbResult==='needs_revision')) return 'in_revision';
+  if(varWithVideo.every(v=>!v.mbResult||v.mbResult==='pending')) return 'pending';
+  // legacy winner/loser support
+  if(varWithVideo.some(v=>v.mbResult==='winner')) return 'winner';
+  if(varWithVideo.every(v=>v.mbResult==='loser')) return 'loser';
   return 'pending';
 }
 function hasAccess(page){ const me=u(); if(me.role==='admin')return true; return me.perms?.[page]!==undefined && me.perms[page]; }
@@ -903,10 +914,10 @@ function pgTasks(){
     const sepLabel= isToday ? `${label} — TODAY` : `${label} · ${fmtDate(ymd)}`;
     const badge   = allDt.length ? `<span style="background:rgba(255,255,255,.2);padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600">${doneCnt}/${allDt.length} done</span>` : '';
 
-    const sep = `<tr><td colspan="11" style="background:${sepBg};color:${sepColor};padding:9px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;border-top:2px solid ${sepBg}">${sepLabel}&nbsp;&nbsp;${badge}</td></tr>`;
+    const sep = `<tr><td colspan="12" style="background:${sepBg};color:${sepColor};padding:9px 16px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;border-top:2px solid ${sepBg}">${sepLabel}&nbsp;&nbsp;${badge}</td></tr>`;
 
     if(!dt.length){
-      return sep + `<tr><td colspan="11" style="padding:10px 16px;color:var(--muted);font-size:12px">No tasks${APP.tab!=='all'?' matching this filter':''}</td></tr>`;
+      return sep + `<tr><td colspan="12" style="padding:10px 16px;color:var(--muted);font-size:12px">No tasks${APP.tab!=='all'?' matching this filter':''}</td></tr>`;
     }
 
     return sep + dt.map(t=>{
@@ -916,7 +927,7 @@ function pgTasks(){
       const nVar = t.variants?t.variants.length:1;
       const upl = taskLatestUpload(t);
       return `<tr class="clickable" onclick="openTask(${t.id})">
-        <td><b>${p?.name||t.testProductName||'—'}</b>${t.isTest?` <span class="chip chip-w" style="font-size:9px">TEST</span>`:''}${nVar>1?` <span class="chip chip-a" style="font-size:9px">${nVar} hooks</span>`:''}${t.mbNote?` <span class="chip chip-w" style="font-size:9px" title="${t.mbNote.replace(/"/g,'&quot;')}">📌 note</span>`:''}<div style="font-size:11px;color:var(--muted)">${t.angle.slice(0,40)}${t.angle.length>40?'…':''}</div></td>
+        <td><b>${p?.name||t.testProductName||'—'}</b>${t.isTest?` <span class="chip chip-w" style="font-size:9px">TEST</span>`:''}${nVar>1?` <span class="chip chip-a" style="font-size:9px">${nVar} hooks</span>`:''}${t.mbNote?` <span class="chip chip-w" style="font-size:9px" title="${t.mbNote.replace(/"/g,'&quot;')}">📌</span>`:''}<div style="font-size:11px;color:var(--muted)">${t.angle.slice(0,40)}${t.angle.length>40?'…':''}</div></td>
         <td><span class="chip chip-n" style="font-size:10px">${market}</span></td>
         <td>${chip(t.campaignType,'n')}</td>
         <td style="font-size:11px;color:var(--sub);max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.videoType}</td>
@@ -925,7 +936,8 @@ function pgTasks(){
         <td>${sChip(t.status)}</td>
         <td style="white-space:nowrap">${upl?fmtDateTime(upl):'<span style="color:var(--muted)">—</span>'}</td>
         <td>${late===true?'<span class="late">Late</span>':late===false?'<span class="ontime">On time</span>':'<span style="color:var(--muted)">—</span>'}</td>
-        <td>${taskOverallResult(t)!=='pending'?rChip(taskOverallResult(t)):'<span style="color:var(--muted)">—</span>'}</td>
+        <td>${taskHasFeedback(t)?chip('Feedback given','ok'):'<span style="color:var(--muted)">—</span>'}</td>
+        <td>${taskOverallResult(t)!=='pending'?sChip(taskOverallResult(t)):'<span style="color:var(--muted)">—</span>'}</td>
         <td><button class="btn btn-out btn-xs" onclick="event.stopPropagation();openTask(${t.id})">Open</button></td>
       </tr>`;
     }).join('');
@@ -957,7 +969,7 @@ function pgTasks(){
   </div>
   <div class="tabs">${tabs.map(t=>`<button class="tab ${APP.tab===t.id?'on':''}" onclick="APP.tab='${t.id}';render()">${t.l}</button>`).join('')}</div>
   <div class="card"><div class="tw"><table>
-    <thead><tr><th>Product / Angle</th><th>Market</th><th>Campaign</th><th>Format</th><th>Voice</th><th>Editor</th><th>Status</th><th>Uploaded</th><th>Deadline</th><th>Result</th><th></th></tr></thead>
+    <thead><tr><th>Product / Angle</th><th>Market</th><th>Campaign</th><th>Format</th><th>Voice</th><th>Editor</th><th>Status</th><th>Uploaded</th><th>Deadline</th><th>Feedback</th><th>Result</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div></div>`;
 }
@@ -1640,7 +1652,10 @@ function openTask(id){
     <div><div class="mt">${p?.name||t.testProductName||'Task'}</div><div class="ms">${fmtDate(t.taskDate)} · ${t.day} · ${APP.users[t.assignedVE]?.name||'?'}</div>
       <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">${p?mchip(p.market):chip(t.testMarket||'—','n')}${chip(t.campaignType,'n')}${chip(t.videoType,'n')}${t.isTest?chip('TEST','w'):''}</div>
     </div>
-    <button class="btn btn-out btn-sm" onclick="closeM1()">✕</button>
+    <div style="display:flex;gap:6px">
+      ${canMB||isA?`<button class="btn btn-out btn-sm" onclick="closeM1();openTaskEdit(${t.id})">Edit task</button>`:''}
+      <button class="btn btn-out btn-sm" onclick="closeM1()">✕</button>
+    </div>
   </div>
   <div class="mb">
     ${t.mbNote?`<div class="al al-w" style="background:var(--accent-bg);border-color:#D5E2FB;color:var(--accent-d)"><i>📌</i><div><b>Important note from ${APP.users[t.assignedMB]?.name||'media buyer'}:</b><br>${t.mbNote}</div></div>`:''}
@@ -1687,47 +1702,50 @@ function openTask(id){
 }
 
 function variantCard(v,i,canVE,canMB,isA,t){
-  const late = v.uploadedAt ? (new Date(v.uploadedAt) > (()=>{const d=new Date(t.deadlineDate);d.setHours(23,59,59);return d;})()) : null;
-  const inRevision = t.status==='in_revision';
-  const revLate = v.revisionUploadedAt ? (new Date(v.revisionUploadedAt) > (()=>{const d=new Date(t.deadlineDate);d.setHours(23,59,59);return d;})()) : null;
-  return `
-  <div class="card" style="margin-bottom:10px;border-color:${v.mbResult==='winner'?'var(--ok-bd)':v.mbResult==='loser'?'var(--bad-bd)':'var(--border)'}">
-    <div class="card-h" style="padding:10px 14px;background:${v.mbResult==='winner'?'var(--ok-bg)':v.mbResult==='loser'?'var(--bad-bg)':'var(--s50)'}">
-      <div style="font-size:12px;font-weight:700;color:var(--ink)">Hook variant ${i+1}${v.mbResult!=='pending'?' · '+(v.mbResult==='winner'?'Winner':'Loser'):''}</div>
-      ${(canVE||isA)&&i>0?`<button class="btn btn-ghost btn-xs" onclick="removeVariant(${i})">Remove</button>`:''}
-    </div>
-    <div class="card-b" style="padding:13px 14px">
-      <div class="fg" style="margin-bottom:10px">
-        <label class="fl">Hook text</label>
-        <input class="fi" data-vfield="hook" data-vidx="${i}" value="${(v.hook||'').replace(/"/g,'&quot;')}" placeholder="Hook for this variant..." ${!canVE&&!isA?'disabled':''}>
-      </div>
-      <div class="fg" style="margin-bottom:10px">
-        <label class="fl">Video link</label>
-        <input class="fi" data-vfield="videoLink" data-vidx="${i}" value="${v.videoLink||''}" placeholder="https://drive.google.com/..." ${!canVE&&!isA?'disabled':''}>
-        ${v.uploadedAt?`<div style="font-size:11px;margin-top:5px;color:var(--muted)">Uploaded ${fmtDateTime(v.uploadedAt)} ${late===true?'<span class="late">· Late</span>':late===false?'<span class="ontime">· On time</span>':''}</div>`:''}
-      </div>
-      ${inRevision?`
-      <div class="fg" style="margin-bottom:10px;padding:10px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-radius:8px">
-        <label class="fl" style="color:var(--warn)">⟲ Revision link <span style="font-weight:400;color:var(--sub)">— upload the corrected version of this hook here</span></label>
-        <input class="fi" data-vfield="revisionLink" data-vidx="${i}" value="${v.revisionLink||''}" placeholder="https://drive.google.com/... (revised version)" ${!canVE&&!isA?'disabled':''}>
-        ${v.revisionUploadedAt?`<div style="font-size:11px;margin-top:5px;color:var(--muted)">Revision uploaded ${fmtDateTime(v.revisionUploadedAt)} ${revLate===true?'<span class="late">· Late</span>':revLate===false?'<span class="ontime">· On time</span>':''}</div>`:''}
-      </div>`:''}
-      ${v.revisionLink&&!inRevision?`<div class="fg" style="margin-bottom:10px"><label class="fl">Revised video link</label><a href="${v.revisionLink}" target="_blank" style="display:block;padding:7px 10px;background:var(--ok-bg);border:1px solid var(--ok-bd);border-radius:7px;font-size:12px">${v.revisionLink}</a></div>`:''}
-      ${!v.videoLink&&!isA?`<div class="al al-i" style="margin-bottom:0"><i>◷</i><div>Waiting for video link.</div></div>`:`
-        ${v.videoLink?`<a href="${v.videoLink}" target="_blank" style="display:block;padding:7px 10px;background:var(--accent-bg);border-radius:7px;font-size:12px;margin-bottom:11px">${v.videoLink}</a>`:''}
-        <div class="fg" style="margin-bottom:10px"><label class="fl">Result</label>
-          <div class="rtog">
-            <button class="w ${v.mbResult==='winner'?'on':''}" type="button" onclick="${canMB||isA?`setVariantResult(${i},'winner')`:''}" ${!canMB&&!isA?'disabled':''}>Winner</button>
-            <button class="l ${v.mbResult==='loser'?'on':''}" type="button" onclick="${canMB||isA?`setVariantResult(${i},'loser')`:''}" ${!canMB&&!isA?'disabled':''}>Loser</button>
-            <button class="p ${v.mbResult==='pending'?'on':''}" type="button" onclick="${canMB||isA?`setVariantResult(${i},'pending')`:''}" ${!canMB&&!isA?'disabled':''}>Pending</button>
-          </div>
-        </div>
-        <div class="fg" style="margin-bottom:0"><label class="fl">Feedback of this video version</label>
-          <textarea class="fi" data-vfield="mbFeedback" data-vidx="${i}" rows="2" placeholder="Feedback specific to this video version..." ${!canMB&&!isA?'disabled':''}>${v.mbFeedback||''}</textarea>
-        </div>
-      `}
-    </div>
-  </div>`;
+  const deadlineYMD=(t.deadlineDate||'').slice(0,10);
+  const dlEnd = deadlineYMD ? new Date(deadlineYMD+'T23:59:59') : null;
+  const late = v.uploadedAt&&dlEnd ? new Date(v.uploadedAt)>dlEnd : null;
+  const revLate = v.revisionUploadedAt&&dlEnd ? new Date(v.revisionUploadedAt)>dlEnd : null;
+  const inRevision = v.mbResult==='needs_revision';
+  const isApproved = v.mbResult==='approved';
+  const borderColor = isApproved?'var(--ok-bd)':inRevision?'var(--warn-bd)':'var(--border)';
+  const headerBg   = isApproved?'var(--ok-bg)':inRevision?'var(--warn-bg)':'var(--s50)';
+  const statusLabel = isApproved?'&#10003; Approved':inRevision?'&#8634; Needs revision':v.videoLink?'Waiting for approval':'Pending upload';
+  const rmBtn = (canVE||isA)&&i>0 ? '<button class="btn btn-ghost btn-xs" onclick="removeVariant('+i+')">Remove</button>' : '';
+  const uploadInfo = v.uploadedAt ? '<div style="font-size:11px;margin-top:5px;color:var(--muted)">Uploaded '+fmtDateTime(v.uploadedAt)+' '+(late===true?'<span class="late">&middot; Late</span>':late===false?'<span class="ontime">&middot; On time</span>':'')+'</div>' : '';
+  const videoOpenLink = v.videoLink ? '<a href="'+v.videoLink+'" target="_blank" style="display:inline-block;margin-top:5px;font-size:11px;color:var(--accent)">Open video &#8599;</a>' : '';
+  let revisionBlock = '';
+  if(inRevision){
+    const feedbackDisplay = v.revisionFeedback ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.5">'+escHtml(v.revisionFeedback)+'</div>' : '';
+    const revUploadInfo = v.revisionUploadedAt ? '<div style="font-size:11px;margin-top:5px;color:var(--muted)">Revision uploaded '+fmtDateTime(v.revisionUploadedAt)+' '+(revLate===true?'<span class="late">&middot; Late</span>':revLate===false?'<span class="ontime">&middot; On time</span>':'')+'</div>' : '';
+    const veRevInput = canVE||isA ? '<label class="fl" style="color:var(--warn)">Upload revised video link</label><input class="fi" data-vfield="revisionLink" data-vidx="'+i+'" value="'+(v.revisionLink||'')+'" placeholder="https://drive.google.com/... (revised version)">'+revUploadInfo : '<div style="font-size:12px;color:var(--muted)">Waiting for editor to upload revised version.</div>';
+    revisionBlock = '<div style="padding:11px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-radius:8px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--warn);margin-bottom:4px">&#8634; Revision requested</div>'+feedbackDisplay+veRevInput+'</div>';
+  }
+  const revisedLink = v.revisionLink&&!inRevision ? '<div style="padding:9px 12px;background:var(--ok-bg);border:1px solid var(--ok-bd);border-radius:8px;margin-bottom:10px;font-size:12px"><b>Revised:</b> <a href="'+v.revisionLink+'" target="_blank" style="color:var(--accent)">Open &#8599;</a></div>' : '';
+  let reviewBlock = '';
+  if(!v.videoLink){
+    reviewBlock = '<div class="al al-i" style="margin-bottom:0"><i>&#9711;</i><div>Waiting for video link from editor.</div></div>';
+  } else if(canMB||isA){
+    const approveBtn = '<button class="btn btn-sm '+(isApproved?'btn-pri':'btn-out')+'" type="button" onclick="setVariantResult('+i+',\'approved\')">&#10003; Approve</button>';
+    const revisionBtn = '<button class="btn btn-sm '+(inRevision?'btn-bad':'btn-out')+'" type="button" onclick="setVariantResult('+i+',\'needs_revision\')">&#8634; Needs revision</button>';
+    const resetBtn = (isApproved||inRevision) ? '<button class="btn btn-ghost btn-sm" type="button" onclick="setVariantResult('+i+',\'pending\')">Reset</button>' : '';
+    const feedbackField = inRevision
+      ? '<div class="fg" style="margin-bottom:0"><label class="fl" style="color:var(--warn)">Revision feedback</label><textarea class="fi" data-vfield="revisionFeedback" data-vidx="'+i+'" rows="2" placeholder="e.g. Show product in first 3 sec, add subtitle...">'+escHtml(v.revisionFeedback||'')+'</textarea></div>'
+      : '<div class="fg" style="margin-bottom:0"><label class="fl">Optional note</label><textarea class="fi" data-vfield="mbFeedback" data-vidx="'+i+'" rows="2" placeholder="Optional feedback...">'+escHtml(v.mbFeedback||'')+'</textarea></div>';
+    reviewBlock = '<div style="margin-bottom:10px"><label class="fl">Review this version</label><div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+approveBtn+revisionBtn+resetBtn+'</div></div>'+feedbackField;
+  }
+  return '<div class="card" style="margin-bottom:10px;border:1.5px solid '+borderColor+'">'
+    +'<div class="card-h" style="padding:10px 14px;background:'+headerBg+'">'
+    +'<div style="font-size:12px;font-weight:700;color:var(--ink)">Hook variant '+(i+1)+' &nbsp;<span style="font-weight:400;color:var(--muted)">'+statusLabel+'</span></div>'+rmBtn
+    +'</div>'
+    +'<div class="card-b" style="padding:13px 14px">'
+    +'<div class="fg" style="margin-bottom:10px"><label class="fl">Hook text</label>'
+    +'<input class="fi" data-vfield="hook" data-vidx="'+i+'" value="'+(v.hook||'').replace(/"/g,'&quot;')+'" placeholder="Hook for this variant..." '+((!canVE&&!isA)?'disabled':'')+'></div>'
+    +'<div class="fg" style="margin-bottom:10px"><label class="fl">Video link</label>'
+    +'<input class="fi" data-vfield="videoLink" data-vidx="'+i+'" value="'+(v.videoLink||'')+'" placeholder="https://drive.google.com/..." '+((!canVE&&!isA)?'disabled':'')+'>'
+    +uploadInfo+videoOpenLink+'</div>'
+    +revisionBlock+revisedLink+reviewBlock
+    +'</div></div>';
 }
 
 function addVariant(){
@@ -1769,19 +1787,38 @@ function renderTaskModalBody(){
 async function saveTask(id){
   syncVariantsFromDOM();
   const t=tk(id);
-  const st=document.getElementById('tst')?.value||t.status;
   const mbNote=document.getElementById('tmbn')?.value?.trim();
   const angle=document.getElementById('tangle')?.value?.trim();
   const variants=APP.selTask.variants.map(v=>({...v}));
-  if(st==='done'){
-    variants.forEach(v=>{ if(v.videoLink&&v.videoLink.trim()&&!v.uploadedAt) v.uploadedAt=new Date().toISOString(); });
+
+  // Auto-timestamp uploads
+  variants.forEach(v=>{
+    if(v.videoLink&&v.videoLink.trim()&&!v.uploadedAt) v.uploadedAt=new Date().toISOString();
+    if(v.revisionLink&&v.revisionLink.trim()&&!v.revisionUploadedAt) v.revisionUploadedAt=new Date().toISOString();
+  });
+
+  // Auto-compute task status from variant results
+  const variantsWithVideo = variants.filter(v=>v.videoLink);
+  let autoStatus = 'pending'; // no video uploaded at all
+  if(variantsWithVideo.length>0){
+    const allApproved = variantsWithVideo.every(v=>v.mbResult==='approved');
+    const anyRevision = variantsWithVideo.some(v=>v.mbResult==='needs_revision');
+    const allPending  = variantsWithVideo.every(v=>!v.mbResult||v.mbResult==='pending');
+    if(allApproved) autoStatus='approved';
+    else if(anyRevision) autoStatus='in_revision';
+    else if(allPending) autoStatus='done'; // uploaded, waiting for MB review
+    else autoStatus='done'; // mixed — some reviewed some not
   }
-  variants.forEach(v=>{ if(v.revisionLink&&v.revisionLink.trim()&&!v.revisionUploadedAt) v.revisionUploadedAt=new Date().toISOString(); });
+  // Allow manual status override only if admin (auto is default for MB/VE)
+  const manualSt=document.getElementById('tst')?.value;
+  const me=u();
+  const st = me.role==='admin' && manualSt ? manualSt : autoStatus;
+
   const patch={ status:st, variants };
   if(mbNote!==undefined) patch.mbNote=mbNote;
   if(angle) patch.angle=angle;
   await updTask(id, patch);
-  await logHistory('updated', 'task', id, `Updated task for ${pr(t.productId)?.name||t.testProductName||'product'} — status: ${st}`);
+  await logHistory('updated','task',id,`Updated task for ${pr(t.productId)?.name||t.testProductName||'product'} — status: ${st}`);
   closeM1(); render();
 }
 async function delTask(id){
@@ -1792,6 +1829,53 @@ async function delTask(id){
   await sb.from('tasks').delete().eq('id',id);
   await logHistory('deleted','task',id,`Deleted task for "${name}" (${t.taskDate})`);
   closeM1(); render();
+}
+function openTaskEdit(id){
+  const t=tk(id); if(!t)return;
+  // Open the create modal, pre-filled with the task's data, then override the action button to update
+  openTaskCreate();
+  // Pre-fill after modal is open
+  setTimeout(()=>{
+    if(t.isTest){
+      setTaskMode('testing');
+      if(document.getElementById('c_testprod')) document.getElementById('c_testprod').value=t.testProductId;
+    } else {
+      setTaskMode('scaling');
+      if(document.getElementById('c_prod')) document.getElementById('c_prod').value=t.productId;
+      // trigger angle/hook load for this product
+      const evt = new Event('change');
+      document.getElementById('c_prod')?.dispatchEvent(evt);
+    }
+    if(document.getElementById('c_date'))  document.getElementById('c_date').value = t.taskDate;
+    if(document.getElementById('c_type'))  document.getElementById('c_type').value = t.videoType;
+    if(document.getElementById('c_camp'))  document.getElementById('c_camp').value = t.campaignType;
+    if(document.getElementById('c_voice')) document.getElementById('c_voice').value = t.voiceOver;
+    if(document.getElementById('c_mbnote')) document.getElementById('c_mbnote').value = t.mbNote||'';
+    if(document.getElementById('c_ve'))    document.getElementById('c_ve').value = t.assignedVE;
+    // Update VE pill selection
+    document.querySelectorAll('[id^="ve_"]').forEach(b=>b.classList.toggle('on', b.id==='ve_'+t.assignedVE));
+    // Change the Assign button to Update
+    const assignBtn = document.querySelector('#md2 .btn-pri');
+    if(assignBtn){ assignBtn.textContent='Update task'; assignBtn.onclick=()=>updateTask(id); }
+    // Update modal subtitle
+    const ms = document.querySelector('#md2 .ms');
+    if(ms) ms.textContent=`Editing task — ${fmtDate(t.taskDate)}`;
+  }, 100);
+}
+async function updateTask(id){
+  const t=tk(id); if(!t)return;
+  const type=document.getElementById('c_type')?.value;
+  const camp=document.getElementById('c_camp')?.value;
+  const taskDate=document.getElementById('c_date')?.value;
+  const voice=document.getElementById('c_voice')?.value;
+  const veId=document.getElementById('c_ve')?.value;
+  const mbNote=document.getElementById('c_mbnote')?.value?.trim()||'';
+  if(!veId||!taskDate){ alert('Fill all required fields.'); return; }
+  const d=new Date(taskDate+'T00:00:00');
+  const patch={ taskDate, day:dayName(d), assignedVE:veId, videoType:type, campaignType:camp, voiceOver:voice, mbNote, deadlineDate:taskDate+'T23:59:59' };
+  await updTask(id, patch);
+  await logHistory('updated','task',id,`Edited task for "${pr(t.productId)?.name||t.testProductName||'product'}"`);
+  closeM2(); render();
 }
 async function sendRevision(id){
   const note=document.getElementById('trn')?.value?.trim();
@@ -1975,7 +2059,7 @@ async function createTask(){
     revisionNote:'',
     mbNote,
     managerApproval:'pending',
-    deadlineDate:d.toISOString(),
+    deadlineDate: taskDate+'T23:59:59', // local end-of-day for the chosen date
     isTest: mode==='testing',
     createdAt:new Date().toISOString(), updatedAt:new Date().toISOString(),
   };
@@ -2277,19 +2361,65 @@ function openProductModal(pid){
     <div class="tabs" style="flex-wrap:wrap">
       <button class="tab on" id="pt_a" onclick="prodTab('a',${pid})">🎯 ${p.angles.length} Angles</button>
       <button class="tab" id="pt_h" onclick="prodTab('h',${pid})">🪝 ${p.hooks.length} Hooks</button>
+      <button class="tab" id="pt_v" onclick="prodTab('v',${pid})">🎬 Videos</button>
       <button class="tab" id="pt_i" onclick="prodTab('i',${pid})">🖼 Images (${(p.images||[]).length})</button>
-      <button class="tab" id="pt_r" onclick="prodTab('r',${pid})">🎬 Raw Clips</button>
+      <button class="tab" id="pt_r" onclick="prodTab('r',${pid})">📁 Raw Clips</button>
     </div>
     <div id="ptc">${prodTabContent('a',pid)}</div>
   </div>`;
   openM2();
 }
-function prodTab(t,pid){ ['a','h','i','r'].forEach(k=>document.getElementById('pt_'+k).className='tab'+(k===t?' on':'')); document.getElementById('ptc').innerHTML=prodTabContent(t,pid); }
+function prodTab(t,pid){ ['a','h','v','i','r'].forEach(k=>{const el=document.getElementById('pt_'+k); if(el) el.className='tab'+(k===t?' on':'');}); document.getElementById('ptc').innerHTML=prodTabContent(t,pid); }
 function prodTabContent(t,pid){
   const p=pr(pid); const me=u(); const isVE=me.role==='video_editor', isA=me.role==='admin', isPL=me.role==='product_lister', isMB=me.role==='media_buyer';
   const canManage = isA || isPL;
   const canEditContent = canManage || isMB; // MB can also add/edit angles & hooks directly, not just view
 
+  if(t==='v'){
+    // Aggregate all video links uploaded for this product across all tasks
+    const pTasks = APP.tasks.filter(t=>t.productId===pid && !t.isTest);
+    if(!pTasks.length) return `<div class="empty"><div class="empty-i">🎬</div><div class="empty-t">No tasks assigned for this product yet</div></div>`;
+    // Group by angle
+    const byAngle = {};
+    pTasks.forEach(task=>{
+      const angle = task.angle||'—';
+      if(!byAngle[angle]) byAngle[angle]=[];
+      (task.variants||[]).forEach((v,vi)=>{
+        if(v.videoLink){
+          byAngle[angle].push({
+            hook: v.hook||`Hook ${vi+1}`,
+            videoLink: v.videoLink,
+            revisionLink: v.revisionLink||null,
+            mbResult: v.mbResult||'pending',
+            uploadedAt: v.uploadedAt||null,
+            taskDate: task.taskDate,
+            veId: task.assignedVE,
+            taskId: task.id,
+          });
+        }
+      });
+    });
+    const totalVideos = Object.values(byAngle).reduce((s,a)=>s+a.length,0);
+    if(!totalVideos) return `<div class="empty"><div class="empty-i">🎬</div><div class="empty-t">No videos uploaded yet for this product</div></div>`;
+    return `
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px"><b style="color:var(--ink)">${totalVideos} video${totalVideos>1?'s':''}</b> uploaded across ${Object.keys(byAngle).length} angle${Object.keys(byAngle).length>1?'s':''}</div>
+      ${Object.entries(byAngle).map(([angle,videos])=>`
+        <div style="margin-bottom:20px">
+          <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;padding:7px 10px;background:var(--accent-bg);border-radius:7px">${angle}</div>
+          ${videos.map(v=>`
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:${v.mbResult==='approved'?'var(--ok-bg)':v.mbResult==='needs_revision'?'var(--warn-bg)':'#fff'}">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12px;font-weight:600;margin-bottom:2px">${escHtml(v.hook)}</div>
+                <div style="font-size:11px;color:var(--muted)">${av(v.veId,16)} ${APP.users[v.veId]?.name||'?'} · ${fmtDate(v.taskDate)}</div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center">
+                ${v.mbResult==='approved'?chip('Approved','ok'):v.mbResult==='needs_revision'?chip('Revision','w'):''}
+                <a href="${v.videoLink}" target="_blank" class="btn btn-out btn-xs">Video ↗</a>
+                ${v.revisionLink?`<a href="${v.revisionLink}" target="_blank" class="btn btn-ghost btn-xs">Revised ↗</a>`:''}
+              </div>
+            </div>`).join('')}
+        </div>`).join('')}`;
+  }
   if(t==='a'){
     if(canEditContent){
       return `
@@ -2317,19 +2447,30 @@ H02 Leaking pipe at 2AM? Fixed in 10 min
   }
   if(t==='i'){
     const imgs=p.images||[];
-    return `${canManage?`<div class="drop" onclick="document.getElementById('pimg_${pid}').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="pImgDrop(event,${pid})"><input type="file" id="pimg_${pid}" accept="image/*" multiple onchange="pImgSel(event,${pid})"><div style="font-size:26px;margin-bottom:6px">🖼</div><div style="font-size:13px;font-weight:600;color:var(--sub)">Click or drag images</div></div>`:''}
-      ${imgs.length?`<div class="imgs" style="margin-top:${canManage?'12px':'0'}">${imgs.map((s,i)=>`<div class="imw"><img src="${s}">${canManage?`<div class="x" onclick="delPImg(${pid},${i})">✕</div>`:''}</div>`).join('')}</div>`:`<div class="empty"><div class="empty-i">🖼</div><div class="empty-t">No images yet</div></div>`}`;
+    const hasAdLink = p.adImagesLink&&p.adImagesLink.trim();
+    return `
+    <div style="margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:9px;background:var(--s50)">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">📁 Ad images Drive folder</div>
+      <div style="font-size:11px;color:var(--sub);margin-bottom:8px">Shared Drive folder containing all images to use in ads for this product.</div>
+      ${hasAdLink?`<a href="${p.adImagesLink}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:7px 12px;background:var(--accent-bg);border:1px solid #D5E2FB;border-radius:7px;font-size:12px;color:var(--accent);margin-bottom:8px">Open ad images folder ↗</a>`:''}
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="fi" id="adImgLink_${pid}" style="flex:1" placeholder="https://drive.google.com/drive/folders/..." value="${p.adImagesLink||''}">
+        <button class="btn btn-pri btn-sm" onclick="saveAdImagesLink(${pid})">Save</button>
+      </div>
+    </div>
+    ${canManage?`<div class="drop" onclick="document.getElementById('pimg_${pid}').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="pImgDrop(event,${pid})"><input type="file" id="pimg_${pid}" accept="image/*" multiple onchange="pImgSel(event,${pid})"><div style="font-size:26px;margin-bottom:6px">🖼</div><div style="font-size:13px;font-weight:600;color:var(--sub)">Click or drag product images</div></div>`:''}
+    ${imgs.length?`<div class="imgs" style="margin-top:12px">${imgs.map((s,i)=>`<div class="imw"><img src="${s}">${canManage?`<div class="x" onclick="delPImg(${pid},${i})">✕</div>`:''}</div>`).join('')}</div>`:`<div class="empty" style="margin-top:8px"><div class="empty-i">🖼</div><div class="empty-t">No product images yet</div></div>`}`;
   }
   if(t==='r'){
     const has=p.rawVideo&&p.rawVideo.trim();
-    return `
-      <div style="font-size:12px;color:var(--sub);margin-bottom:14px;line-height:1.6">The editor uploads <b>one shared link</b> with all raw clips for this product (Drive folder, Dropbox, etc). MB & admin access it directly.</div>
-      <div style="display:flex;align-items:center;gap:12px;padding:14px;border-radius:10px;border:1px solid ${has?'var(--ok-bd)':'var(--border)'};background:${has?'var(--ok-bg)':'#fff'};margin-bottom:16px">
-        <div style="font-size:22px">${has?'🎬':'📭'}</div>
-        <div style="flex:1;min-width:0"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">${has?'Raw clips available':'No clips uploaded'}</div>${has?`<a href="${p.rawVideo}" target="_blank" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">${p.rawVideo}</a>`:`<div style="font-size:12px;color:var(--muted)">Waiting for editor</div>`}</div>
-        ${has?`<a href="${p.rawVideo}" target="_blank" class="btn btn-out btn-sm">Open ↗</a>`:''}
-      </div>
-      ${isVE||canManage?`<div class="divider"></div><div class="fg"><label class="fl">${isVE?'Upload your raw clips link (one-time)':'Edit raw clips link'}</label><input class="fi" id="raw_${pid}" placeholder="https://drive.google.com/drive/folders/..." value="${p.rawVideo||''}"></div><button class="btn btn-pri btn-sm" onclick="saveRaw(${pid})">Save link</button>${has?`<button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="APP.products.find(x=>x.id===${pid}).rawVideo='';prodTab('r',${pid});render()">Remove</button>`:''}`:''}`;
+    const linkEl = has ? '<a href="'+p.rawVideo+'" target="_blank" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">'+p.rawVideo+'</a>' : '<div style="font-size:12px;color:var(--muted)">Waiting for editor</div>';
+    const openBtn = has ? '<a href="'+p.rawVideo+'" target="_blank" class="btn btn-out btn-sm">Open &#8599;</a>' : '';
+    const editSection = (isVE||canManage) ? '<div class="divider"></div><div class="fg"><label class="fl">'+(isVE?'Upload your raw clips link (one-time)':'Edit raw clips link')+'</label><input class="fi" id="raw_'+pid+'" placeholder="https://drive.google.com/drive/folders/..." value="'+(p.rawVideo||'')+'"></div><button class="btn btn-pri btn-sm" onclick="saveRaw('+pid+')">Save link</button>'+(has?'<button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="APP.products.find(x=>x.id==='+pid+').rawVideo=\'\';prodTab(\'r\','+pid+');render()">Remove</button>':'') : '';
+    return '<div style="font-size:12px;color:var(--sub);margin-bottom:14px;line-height:1.6">The editor uploads <b>one shared link</b> with all raw clips for this product (Drive folder, Dropbox, etc). MB &amp; admin access it directly.</div>'
+      +'<div style="display:flex;align-items:center;gap:12px;padding:14px;border-radius:10px;border:1px solid '+(has?'var(--ok-bd)':'var(--border)')+';background:'+(has?'var(--ok-bg)':'#fff')+';margin-bottom:16px">'
+      +'<div style="font-size:22px">'+(has?'&#127908;':'&#128235;')+'</div>'
+      +'<div style="flex:1;min-width:0"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">'+(has?'Raw clips available':'No clips uploaded')+'</div>'+linkEl+'</div>'
+      +openBtn+'</div>'+editSection;
   }
 }
 async function saveInlineAngles(pid){
@@ -2351,6 +2492,12 @@ async function saveInlineHooks(pid){
 function pImgSel(e,pid){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=async ev=>{const p=pr(pid);if(!p.images)p.images=[];p.images.push(ev.target.result);await sb.from('products').update({images:p.images}).eq('id',pid);prodTab('i',pid);document.getElementById('pt_i').textContent='🖼 Images ('+p.images.length+')';};r.readAsDataURL(f);}); }
 function pImgDrop(e,pid){ e.preventDefault(); pImgSel({target:{files:e.dataTransfer.files}},pid); }
 async function delPImg(pid,i){ const p=pr(pid); p.images.splice(i,1); await sb.from('products').update({images:p.images}).eq('id',pid); prodTab('i',pid); document.getElementById('pt_i').textContent='🖼 Images ('+p.images.length+')'; }
+async function saveAdImagesLink(pid){
+  const link=document.getElementById('adImgLink_'+pid)?.value?.trim()||'';
+  const p=pr(pid); p.adImagesLink=link;
+  await sb.from('products').update({ad_images_link:link}).eq('id',pid);
+  prodTab('i',pid);
+}
 async function saveRaw(pid){ pr(pid).rawVideo=document.getElementById('raw_'+pid).value.trim(); await sb.from('products').update({raw_video:pr(pid).rawVideo}).eq('id',pid); prodTab('r',pid); render(); }
 
 // ══════════════════════════════════════════════════════════
