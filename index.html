@@ -518,12 +518,15 @@ function isLate(t){
   if(!t.deadlineDate) return null;
   const upl = taskLatestUpload(t);
   if(!upl) return null;
-  // deadline = end of the deadline day in LOCAL time (23:59:59)
-  // deadlineDate is stored as ISO string; we extract YYYY-MM-DD and set end-of-day locally
+  // deadlineDate is stored as YYYY-MM-DD (plain date, no timezone)
+  // uploadedAt is an ISO timestamp — extract its LOCAL date for comparison
   const deadlineYMD = (t.deadlineDate||'').slice(0,10);
   if(!deadlineYMD) return null;
-  const dl = new Date(deadlineYMD+'T23:59:59');
-  return new Date(upl) > dl;
+  const uplDate = toYMD(new Date(upl)); // convert upload timestamp to local YYYY-MM-DD
+  if(uplDate < deadlineYMD) return false; // uploaded before deadline day = on time
+  if(uplDate > deadlineYMD) return true;  // uploaded after deadline day = late
+  // Same day — on time (upload was on the deadline day itself)
+  return false;
 }
 
 // ─── Variant helpers (a task can have 1–4 hook variants sharing one angle) ───
@@ -1697,9 +1700,9 @@ function openTask(id){
 
 function variantCard(v,i,canVE,canMB,isA,t){
   const deadlineYMD=(t.deadlineDate||'').slice(0,10);
-  const dlEnd = deadlineYMD ? new Date(deadlineYMD+'T23:59:59') : null;
-  const late = v.uploadedAt&&dlEnd ? new Date(v.uploadedAt)>dlEnd : null;
-  const revLate = v.revisionUploadedAt&&dlEnd ? new Date(v.revisionUploadedAt)>dlEnd : null;
+  // Late = uploaded on a day AFTER the deadline day (local date comparison)
+  const late = v.uploadedAt && deadlineYMD ? toYMD(new Date(v.uploadedAt)) > deadlineYMD : null;
+  const revLate = v.revisionUploadedAt && deadlineYMD ? toYMD(new Date(v.revisionUploadedAt)) > deadlineYMD : null;
   const inRevision = v.mbResult==='needs_revision';
   const isApproved = v.mbResult==='approved';
   const borderColor = isApproved?'var(--ok-bd)':inRevision?'var(--warn-bd)':'var(--border)';
@@ -1893,7 +1896,7 @@ async function updateTask(id){
   const mbNote=document.getElementById('c_mbnote')?.value?.trim()||'';
   if(!veId||!taskDate){ alert('Fill all required fields.'); return; }
   const d=new Date(taskDate+'T00:00:00');
-  const patch={ taskDate, day:dayName(d), assignedVE:veId, videoType:type, campaignType:camp, voiceOver:voice, mbNote, deadlineDate:taskDate+'T23:59:59' };
+  const patch={ taskDate, day:dayName(d), assignedVE:veId, videoType:type, campaignType:camp, voiceOver:voice, mbNote, deadlineDate:taskDate };
   await updTask(id, patch);
   await logHistory('updated','task',id,`Edited task for "${pr(t.productId)?.name||t.testProductName||'product'}"`);
   closeM2(); render();
@@ -2080,7 +2083,7 @@ async function createTask(){
     revisionNote:'',
     mbNote,
     managerApproval:'pending',
-    deadlineDate: taskDate+'T23:59:59', // local end-of-day for the chosen date
+    deadlineDate: taskDate, // plain YYYY-MM-DD, same as taskDate — deadline = end of this day (23:59:59 local)
     isTest: mode==='testing',
     createdAt:new Date().toISOString(), updatedAt:new Date().toISOString(),
   };
@@ -2364,19 +2367,28 @@ function openProductModal(pid){
   const me=u();
   const isVE=me.role==='video_editor', isA=me.role==='admin', isPL=me.role==='product_lister';
   const canManage = isA || isPL;
-  const storeLinksHtml = (p.storeLinks&&p.storeLinks.length) ? `
-    <div style="margin-top:11px;padding-top:11px;border-top:1px solid var(--border)">
-      <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px">Also sold on</div>
-      <div style="display:flex;flex-direction:column;gap:5px">
-        ${p.storeLinks.map(sl=>`<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="font-weight:600;min-width:90px">${sl.store||'Store'}</span><a href="${sl.url}" target="_blank" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${sl.url}</a></div>`).join('')}
-      </div>
-    </div>` : '';
+
+  // Build all links section: main URL + every store link
+  const allLinks = [{ store: 'Main store', url: p.url }];
+  (p.storeLinks||[]).forEach(sl=>{ if(sl.url) allLinks.push(sl); });
+  const linksBlock = '<div style="margin-top:10px;padding:10px 0;border-top:1px solid var(--border)">'
+    + '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Product links</div>'
+    + '<div style="display:flex;flex-direction:column;gap:6px">'
+    + allLinks.map(sl=>'<div style="display:flex;align-items:center;gap:8px">'
+        +'<span style="font-size:11px;font-weight:600;min-width:80px;color:var(--sub)">'+(sl.store||'Store')+'</span>'
+        +'<a href="'+sl.url+'" target="_blank" style="font-size:11px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)">'+sl.url+'</a>'
+        +'<a href="'+sl.url+'" target="_blank" class="btn btn-out btn-xs" style="flex-shrink:0">Open &#8599;</a>'
+        +'</div>').join('')
+    +'</div></div>';
+
   document.getElementById('md2').innerHTML=`
   <div class="mh">
-    <div><div class="mt">${p.name}</div><div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${mchip(p.market)}${chip(p.lang,'n')}${chip(p.cat,'n')}${chip(p.status||'High stock',STOCK_STATUS_STYLE[p.status]||'n')}${chip((p.priority||'Medium')+' priority',PRIORITY_STYLE[p.priority]||'n')}</div>
-      ${storeLinksHtml}
+    <div style="flex:1;min-width:0">
+      <div class="mt">${p.name}</div>
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${mchip(p.market)}${chip(p.lang,'n')}${chip(p.cat,'n')}${chip(p.status||'High stock',STOCK_STATUS_STYLE[p.status]||'n')}${chip((p.priority||'Medium')+' priority',PRIORITY_STYLE[p.priority]||'n')}</div>
+      ${linksBlock}
     </div>
-    <div style="display:flex;gap:8px">${canManage?`<button class="btn btn-out btn-sm" onclick="closeM2();openProductForm(${pid})">Edit</button>`:''}<button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
+    <div style="display:flex;gap:8px;flex-shrink:0">${canManage?`<button class="btn btn-out btn-sm" onclick="closeM2();openProductForm(${pid})">Edit</button>`:''}<button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
   </div>
   <div class="mb">
     <div class="tabs" style="flex-wrap:wrap">
