@@ -457,6 +457,8 @@ let APP = {
   reportSeq: 1,
   historyFilter: { action:'', entity:'', from:'', to:'' },
   tpFilter: { from:'', to:'' },
+  prodFilter: { status:'', priority:'' },
+  prodStatsFilter: { from:'', to:'' },
 };
 
 // ══════════════════════════════════════════════════════════
@@ -1105,20 +1107,52 @@ function pgProducts(){
   let ids;
   if(me.role==='media_buyer') ids = me.products;
   else if(me.role==='video_editor'){
-    // VE sees every product belonging to any MB they're assigned to as editor, plus any product from existing tasks
     const myMBs = Object.values(APP.users).filter(u=>u.role==='media_buyer'&&u.ve===me.id);
     const fromMBs = myMBs.flatMap(mb=>mb.products||[]);
     const fromTasks = myTasks().map(t=>t.productId);
     ids = [...new Set([...fromMBs, ...fromTasks])];
   } else ids = APP.products.map(p=>p.id);
-  const prods = canManage ? APP.products : APP.products.filter(p=>ids.includes(p.id));
+
+  let prods = canManage ? [...APP.products] : APP.products.filter(p=>ids.includes(p.id));
+
+  // ── Filter state ──
+  if(!APP.prodFilter) APP.prodFilter = { status:'', priority:'' };
+  if(APP.prodFilter.status) prods = prods.filter(p=>(p.status||'High stock')===APP.prodFilter.status);
+  if(APP.prodFilter.priority) prods = prods.filter(p=>(p.priority||'Medium')===APP.prodFilter.priority);
+
+  // ── Sort: High stock first, then by priority (High > Medium > Low), then by name ──
+  const statusOrder = {'High stock':0,'Medium stock':1,'Low stock':2,'Out of stock':3,'Stop for now — Delivery rate too low':4};
+  const priorityOrder = {'High':0,'Medium':1,'Low':2};
+  prods.sort((a,b)=>{
+    const sd=(statusOrder[a.status||'High stock']||0)-(statusOrder[b.status||'High stock']||0);
+    if(sd!==0) return sd;
+    const pd=(priorityOrder[a.priority||'Medium']||1)-(priorityOrder[b.priority||'Medium']||1);
+    if(pd!==0) return pd;
+    return a.name.localeCompare(b.name);
+  });
+
+  const filterBar = `
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <select class="fi" style="width:auto;padding:6px 10px;font-size:12px" onchange="APP.prodFilter.status=this.value;render()">
+      <option value="">All statuses</option>
+      ${STOCK_STATUSES.map(s=>`<option value="${s}" ${APP.prodFilter.status===s?'selected':''}>${s}</option>`).join('')}
+    </select>
+    <select class="fi" style="width:auto;padding:6px 10px;font-size:12px" onchange="APP.prodFilter.priority=this.value;render()">
+      <option value="">All priorities</option>
+      ${PRIORITIES.map(p=>`<option value="${p}" ${APP.prodFilter.priority===p?'selected':''}>${p} priority</option>`).join('')}
+    </select>
+    ${(APP.prodFilter.status||APP.prodFilter.priority)?`<button class="btn btn-ghost btn-sm" onclick="APP.prodFilter={status:'',priority:''};render()">Clear ✕</button>`:''}
+    <span style="font-size:12px;color:var(--muted);margin-left:4px">${prods.length} product${prods.length!==1?'s':''}</span>
+    ${canManage?`<button class="btn btn-pri btn-sm" style="margin-left:auto" onclick="openProductForm()">+ Add Product</button>`:''}
+  </div>`;
+
   return `
   ${me.role==='video_editor'?`<div class="al al-i"><i>▣</i><div>Products assigned to your media buyer(s). Angles &amp; hooks are in <b>English</b>. Use the <b>Raw Clips</b> tab to upload your raw footage once per product.</div></div>`:''}
-  ${canManage?`<div style="display:flex;justify-content:flex-end;margin-bottom:16px"><button class="btn btn-pri btn-sm" onclick="openProductForm()">+ Add Product</button></div>`:''}
+  ${filterBar}
   <div class="pgrid">
+    ${prods.length===0?`<div class="empty" style="grid-column:1/-1"><div class="empty-i">▣</div><div class="empty-t">No products match this filter</div></div>`:''}
     ${prods.map(p=>{
-      const tc=myTasks().filter(t=>t.productId===p.id).length;
-      const wc=myTasks().filter(t=>t.productId===p.id&&taskHasWinner(t)).length;
+      const wc = APP.tasks.filter(t=>t.productId===p.id&&taskHasWinner(t)).length;
       const hasImg=p.images&&p.images.length;
       const hasRaw=p.rawVideo&&p.rawVideo.trim();
       return `<div class="pcard" onclick="openProductModal(${p.id})">
@@ -1126,11 +1160,11 @@ function pgProducts(){
         <div class="pcard-b">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px"><div class="pcard-n">${p.name}</div>${mchip(p.market)}</div>
           <div class="pcard-u">${p.url}</div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">${chip(p.cat,'n')}${chip(p.lang,'n')}${hasRaw?chip('Raw clips ✓','ok'):''}</div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">${chip(p.status||'High stock',STOCK_STATUS_STYLE[p.status]||'n')}${chip((p.priority||'Medium')+' priority',PRIORITY_STYLE[p.priority]||'n')}</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${chip(p.status||'High stock',STOCK_STATUS_STYLE[p.status]||'n')}${chip((p.priority||'Medium')+' priority',PRIORITY_STYLE[p.priority]||'n')}</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">${chip(p.cat,'n')}${chip(p.lang,'n')}${hasRaw?chip('Raw ✓','ok'):''}</div>
           <div class="pcard-a">${p.angles[0]||'No angles yet'}</div>
           <div style="display:flex;justify-content:space-between;align-items:center">
-            <div style="font-size:10px;color:var(--muted)"><b style="color:var(--ink)">${p.angles.length}</b> angles · <b style="color:var(--ink)">${p.hooks.length}</b> hooks · <b style="color:var(--ink)">${hasImg?p.images.length:0}</b> imgs${wc>0?` · <b style="color:var(--ok)">${wc} win</b>`:''}</div>
+            <div style="font-size:10px;color:var(--muted)"><b style="color:var(--ink)">${p.angles.length}</b> angles · <b style="color:var(--ink)">${p.hooks.length}</b> hooks${wc>0?` · <b style="color:var(--ok)">${wc} win</b>`:''}</div>
             <button class="btn btn-out btn-xs" onclick="event.stopPropagation();openProductModal(${p.id})">View</button>
           </div>
         </div>
@@ -1780,10 +1814,16 @@ function removeVariant(i){
   renderTaskModalBody();
 }
 function syncVariantsFromDOM(){
+  // Only sync fields that have a DOM input AND where the value is non-empty
+  // OR where the existing stored value was empty (to allow clearing)
   document.querySelectorAll('[data-vfield]').forEach(el=>{
     const idx=parseInt(el.dataset.vidx);
     const field=el.dataset.vfield;
-    if(APP.selTask.variants[idx]) APP.selTask.variants[idx][field]=el.value;
+    if(!APP.selTask.variants[idx]) return;
+    const existing = APP.selTask.variants[idx][field];
+    const newVal = el.value;
+    // Only update if: new value is non-empty, OR existing value was empty (allow setting to empty)
+    if(newVal || !existing) APP.selTask.variants[idx][field]=newVal;
   });
 }
 function setVariantResult(i,r){
@@ -2397,17 +2437,64 @@ function openProductModal(pid){
       <button class="tab" id="pt_v" onclick="prodTab('v',${pid})">🎬 Videos</button>
       <button class="tab" id="pt_i" onclick="prodTab('i',${pid})">🖼 Images (${(p.images||[]).length})</button>
       <button class="tab" id="pt_r" onclick="prodTab('r',${pid})">📁 Raw Clips</button>
+      ${isA?`<button class="tab" id="pt_s" onclick="prodTab('s',${pid})">📊 Stats</button>`:''}
     </div>
     <div id="ptc">${prodTabContent('a',pid)}</div>
   </div>`;
   openM2();
 }
-function prodTab(t,pid){ ['a','h','v','i','r'].forEach(k=>{const el=document.getElementById('pt_'+k); if(el) el.className='tab'+(k===t?' on':'');}); document.getElementById('ptc').innerHTML=prodTabContent(t,pid); }
+function prodTab(t,pid){ ['a','h','v','i','r','s'].forEach(k=>{const el=document.getElementById('pt_'+k); if(el) el.className='tab'+(k===t?' on':'');}); document.getElementById('ptc').innerHTML=prodTabContent(t,pid); }
 function prodTabContent(t,pid){
   const p=pr(pid); const me=u(); const isVE=me.role==='video_editor', isA=me.role==='admin', isPL=me.role==='product_lister', isMB=me.role==='media_buyer';
   const canManage = isA || isPL;
   const canEditContent = canManage || isMB; // MB can also add/edit angles & hooks directly, not just view
 
+  if(t==='s'){
+    // Admin-only: spend, leads, CPL, videos created for this product
+    const me2=u(); if(me2.role!=='admin') return '<div class="empty"><div class="empty-t">Admin only</div></div>';
+    // Date filter
+    if(!APP.prodStatsFilter) APP.prodStatsFilter = { from:'', to:'' };
+    const sf = APP.prodStatsFilter;
+    // Reports for this product
+    let reps = APP.reports.filter(r=>r.productId===pid);
+    if(sf.from) reps = reps.filter(r=>r.date>=sf.from);
+    if(sf.to)   reps = reps.filter(r=>r.date<=sf.to);
+    const totalSpend = reps.reduce((s,r)=>s+parseFloat(r.spend||0),0).toFixed(2);
+    const totalLeads = reps.reduce((s,r)=>s+parseInt(r.leads||0),0);
+    const avgCPL = totalLeads>0 ? (totalSpend/totalLeads).toFixed(2) : '—';
+    // Videos: tasks with at least one uploaded video for this product
+    let pTasks = APP.tasks.filter(t=>t.productId===pid);
+    if(sf.from) pTasks = pTasks.filter(t=>t.taskDate>=sf.from);
+    if(sf.to)   pTasks = pTasks.filter(t=>t.taskDate<=sf.to);
+    const videosUploaded = pTasks.reduce((s,t)=>(t.variants||[]).filter(v=>v.videoLink).length+s,0);
+    const tasksApproved  = pTasks.filter(t=>t.status==='approved').length;
+    const winners        = pTasks.reduce((s,t)=>(t.variants||[]).filter(v=>v.adResult==='winner').length+s,0);
+    // By MB breakdown
+    const mbIds = [...new Set(reps.map(r=>r.mbId))];
+    return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap">'
+      +'<input type="date" class="fi" style="width:auto;padding:5px 9px;font-size:12px" value="'+sf.from+'" onchange="APP.prodStatsFilter.from=this.value;prodTab(\'s\','+pid+')">'
+      +'<span style="font-size:12px;color:var(--muted)">to</span>'
+      +'<input type="date" class="fi" style="width:auto;padding:5px 9px;font-size:12px" value="'+sf.to+'" onchange="APP.prodStatsFilter.to=this.value;prodTab(\'s\','+pid+')">'
+      +(sf.from||sf.to?'<button class="btn btn-ghost btn-sm" onclick="APP.prodStatsFilter={from:\'\',to:\'\'};prodTab(\'s\','+pid+')">Clear</button>':'')
+      +'</div>'
+      +'<div class="kpis" style="margin-bottom:20px">'
+      +'<div class="kpi"><div class="kpi-l">Total spend</div><div class="kpi-v">$'+totalSpend+'</div><div class="kpi-s">'+reps.length+' reports</div></div>'
+      +'<div class="kpi"><div class="kpi-l">Total leads</div><div class="kpi-v">'+totalLeads+'</div><div class="kpi-s">Avg CPL: $'+avgCPL+'</div></div>'
+      +'<div class="kpi"><div class="kpi-l">Videos uploaded</div><div class="kpi-v">'+videosUploaded+'</div><div class="kpi-s">Across '+pTasks.length+' tasks</div></div>'
+      +'<div class="kpi"><div class="kpi-l">Winning creatives</div><div class="kpi-v '+(winners>0?'kpi-pos':'')+'">'+winners+'</div><div class="kpi-s">'+tasksApproved+' tasks approved</div></div>'
+      +'</div>'
+      +(mbIds.length?'<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px">Per media buyer</div>'
+        +'<div class="tw"><table>'
+        +'<thead><tr><th>Media Buyer</th><th>Spend</th><th>Leads</th><th>CPL</th><th>Reports</th></tr></thead>'
+        +'<tbody>'+mbIds.map(mbId=>{
+          const mbReps=reps.filter(r=>r.mbId===mbId);
+          const sp=mbReps.reduce((s,r)=>s+parseFloat(r.spend||0),0).toFixed(2);
+          const ld=mbReps.reduce((s,r)=>s+parseInt(r.leads||0),0);
+          const cpl=ld>0?(sp/ld).toFixed(2):'—';
+          return '<tr><td>'+av(mbId,22)+' '+(APP.users[mbId]?.name||mbId)+'</td><td>$'+sp+'</td><td>'+ld+'</td><td><b style="color:'+(parseFloat(cpl)<=2?'var(--ok)':parseFloat(cpl)<=4?'var(--warn)':'var(--bad)')+'">$'+cpl+'</b></td><td>'+mbReps.length+'</td></tr>';
+        }).join('')
+        +'</tbody></table></div>':'<div class="empty"><div class="empty-t">No reports logged for this product yet</div></div>');
+  }
   if(t==='v'){
     // Aggregate all video links uploaded for this product across all tasks
     const pTasks = APP.tasks.filter(t=>t.productId===pid && !t.isTest);
