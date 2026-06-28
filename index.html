@@ -306,7 +306,7 @@ function setLoad(pct, msg){ document.getElementById('loadBar').style.width=pct+'
 function hideLoader(){ document.getElementById('loadingOverlay').style.display='none'; }
 
 // ─── Row → APP format converters ───
-function rowToUser(r){ return { id:r.id, name:r.name, role:r.role, av:r.av, email:r.email, pwd:r.pwd, products:r.products||[], ve:r.ve||null, active:r.active, perms:r.perms||{} }; }
+function rowToUser(r){ return { id:r.id, name:r.name, role:r.role, av:r.av, email:r.email, pwd:r.pwd, products:r.products||[], ves:(r.ves||[]).filter(Boolean), ve:null, active:r.active, perms:r.perms||{} }; }
 function rowToProduct(r){ return { id:r.id, name:r.name, market:r.market, lang:r.lang, cat:r.cat, url:r.url, images:r.images||[], angles:r.angles||[], hooks:r.hooks||[], rawVideo:r.raw_video||'', status:r.status||'High stock', priority:r.priority||'Medium', storeLinks:r.store_links||[], adImagesLink:r.ad_images_link||'' }; }
 function rowToTestProduct(r){ return { id:r.id, name:r.name, url:r.url, market:r.market, lang:r.lang, notes:r.notes||'', assignedMBs:r.assigned_mbs||[], status:r.status||'testing', testResults:r.test_results||[], images:r.images||[], createdAt:r.created_at }; }
 function rowToTask(r){ return { id:r.id, productId:r.product_id, testProductId:r.test_product_id, taskDate:r.task_date, day:r.day, assignedMB:r.assigned_mb, assignedVE:r.assigned_ve, campaignType:r.campaign_type, videoType:r.video_type, voiceOver:r.voice_over, angle:r.angle, variants:r.variants||[], status:r.status, revisionNote:r.revision_note||'', mbNote:r.mb_note||'', managerApproval:r.manager_approval||'pending', deadlineDate:r.deadline_date, isTest:r.is_test||false, testProductName:r.test_product_name||'', testMarket:r.test_market||'', createdAt:r.created_at, updatedAt:r.updated_at }; }
@@ -811,14 +811,15 @@ function dashMB(mbId){
   const s = mbStats(mbId, from, to);
   const yesterday=yesterdayYMD();
   const yestReps = APP.reports.filter(r=>r.mbId===mbId&&r.date===yesterday).sort((a,b)=>b.date.localeCompare(a.date));
-  const ve = APP.users[APP.users[mbId].ve];
+  const mbUser = APP.users[mbId];
+  const veNames = (mbUser.ves||[]).map(vid=>APP.users[vid]?.name).filter(Boolean).join(', ') || '—';
   return `
   <div style="margin-bottom:16px">${dateFilterBar('mbDashFilter')}</div>
   <div class="kpis">
     <div class="kpi"><div class="kpi-l">Average CPL</div><div class="kpi-v">$${s.avgCpl||'—'}</div><div class="kpi-s">${s.totalLeads} leads · $${s.totalSpend} spent</div></div>
     <div class="kpi"><div class="kpi-l">Total leads</div><div class="kpi-v">${s.totalLeads}</div><div class="kpi-s">Across ${s.reportCount} reports</div></div>
     <div class="kpi"><div class="kpi-l">Win rate</div><div class="kpi-v ${s.winRate>=50?'kpi-pos':''}">${s.winRate}%</div><div class="kpi-s">${s.winners} winners · ${s.losers} losers</div></div>
-    <div class="kpi"><div class="kpi-l">Tasks managed</div><div class="kpi-v">${s.tasks}</div><div class="kpi-s">Editor: ${ve?ve.name:'—'}</div></div>
+    <div class="kpi"><div class="kpi-l">Tasks managed</div><div class="kpi-v">${s.tasks}</div><div class="kpi-s">Editor(s): ${veNames}</div></div>
   </div>
   <div class="card">
     <div class="card-h">
@@ -1107,7 +1108,7 @@ function pgProducts(){
   let ids;
   if(me.role==='media_buyer') ids = me.products;
   else if(me.role==='video_editor'){
-    const myMBs = Object.values(APP.users).filter(u=>u.role==='media_buyer'&&u.ve===me.id);
+    const myMBs = Object.values(APP.users).filter(u=>u.role==='media_buyer'&&(u.ves||[]).includes(me.id));
     const fromMBs = myMBs.flatMap(mb=>mb.products||[]);
     const fromTasks = myTasks().map(t=>t.productId);
     ids = [...new Set([...fromMBs, ...fromTasks])];
@@ -1605,7 +1606,7 @@ function teamBody(tab){
   <div class="g2" style="margin-bottom:18px">
     ${mbs.map(mb=>{
       const st=mbStats(mb.id);
-      const ve=APP.users[mb.ve];
+      const mbVes = (mb.ves||[]).map(vid=>APP.users[vid]).filter(Boolean);
       return `<div class="ucard">
         <div class="uhead">${av(mb.id,40)}<div style="flex:1"><div style="font-size:14px;font-weight:700">${mb.name}</div><div style="font-size:11px;color:var(--muted)">Media Buyer</div></div><button class="btn btn-out btn-sm" onclick="openUserModal('${mb.id}')">Edit</button></div>
         <div class="g3" style="margin-bottom:14px">
@@ -1614,8 +1615,11 @@ function teamBody(tab){
           <div class="stat"><div class="stat-v">${st.winners}</div><div class="stat-l">Winners</div></div>
         </div>
         <div style="margin-bottom:12px">
-          <div style="font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px">Video Editor</div>
-          ${ve?`<div style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--s50);border-radius:8px">${av(mb.ve,26)}<div style="font-size:13px;font-weight:600">${ve.name}</div><button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="openUserModal('${mb.id}')">Change</button></div>`:`<button class="btn btn-out btn-sm" onclick="openUserModal('${mb.id}')">Assign editor</button>`}
+          <div style="font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px">Video Editor(s)</div>
+          ${mbVes.length
+            ? mbVes.map(ve=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 11px;background:var(--s50);border-radius:8px;margin-bottom:5px">${av(ve.id,24)}<div style="font-size:13px;font-weight:600">${ve.name}</div></div>`).join('')
+            :'<div style="font-size:12px;color:var(--muted)">No editor assigned</div>'}
+          <button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="openUserModal('${mb.id}')">Manage editors</button>
         </div>
         <div>
           <div style="font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px">Products (${mb.products.length})</div>
@@ -1629,9 +1633,9 @@ function teamBody(tab){
     <div class="tw"><table>
       <thead><tr><th>Editor</th><th>Reports to</th><th>Deadline respect</th><th>Tasks</th><th>Revisions</th><th>Winners</th><th></th></tr></thead>
       <tbody>
-        ${ves.map(ve=>{const s=veStats(ve.id);const mgr=Object.values(APP.users).find(x=>x.ve===ve.id);return `<tr>
+        ${ves.map(ve=>{const s=veStats(ve.id);const mgrs=Object.values(APP.users).filter(x=>x.role==='media_buyer'&&(x.ves||[]).includes(ve.id));return `<tr>
           <td><div style="display:flex;align-items:center;gap:9px">${av(ve.id,28)}<b>${ve.name}</b></div></td>
-          <td>${mgr?mgr.name:'<span style="color:var(--muted)">—</span>'}</td>
+          <td>${mgrs.length?mgrs.map(m=>m.name).join(', '):'<span style="color:var(--muted)">—</span>'}</td>
           <td><span class="${s.dlRespect>=80?'ontime':s.dlRespect>=50?'':'late'}">${s.dlRespect}%</span></td>
           <td>${s.total}</td>
           <td>${s.revisions>0?`<span class="chip chip-w">${s.revisions}</span>`:'0'}</td>
@@ -1961,7 +1965,7 @@ function openTaskCreate(){
   const mb=isA?mbs[0]:me;
   const scalingProds=APP.products.filter(p=>isA||mb.products.includes(p.id));
   const testProds=APP.testProducts.filter(p=>isA||p.assignedMBs?.includes(mb.id));
-  const ve=mb?.ve||Object.values(APP.users).find(x=>x.role==='video_editor')?.id;
+  const ve=(mb?.ves||[])[0]||Object.values(APP.users).find(x=>x.role==='video_editor')?.id;
 
   document.getElementById('md2').innerHTML=`
   <div class="mh"><div><div class="mt">Assign Task</div><div class="ms">Choose mode → select product → assign to editor</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
@@ -2244,7 +2248,14 @@ function openUserModal(uid=null){
       </select>
     </div>
     <div id="u_mbExtra" style="display:${(isEdit?x.role:'video_editor')==='media_buyer'?'block':'none'}">
-      <div class="fg"><label class="fl">Assigned video editor</label><select class="fi" id="u_ve"><option value="">— None</option>${ves.map(v=>`<option value="${v.id}" ${isEdit&&x.ve===v.id?'selected':''}>${v.name}</option>`).join('')}</select></div>
+      <div class="fg"><label class="fl">Video editors assigned to this MB <span style="font-weight:400;color:var(--muted)">(select one or more)</span></label>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px" id="u_ve_picks">
+          ${ves.map(v=>`<label style="display:flex;align-items:center;gap:8px;padding:8px 11px;background:var(--s50);border-radius:8px;cursor:pointer;font-size:13px">
+            <input type="checkbox" id="u_ve_${v.id}" value="${v.id}" ${isEdit&&(x.ves||[]).includes(v.id)?'checked':''} style="width:15px;height:15px;cursor:pointer">
+            ${av(v.id,22)} ${v.name}
+          </label>`).join('')}
+        </div>
+      </div>
       ${isEdit&&x.role==='media_buyer'?`<div class="fg"><label class="fl">Assigned products</label><div>${x.products.map(pid=>{const p=pr(pid);return p?`<span class="tag">${p.name}<span class="x" onclick="APP.users['${uid}'].products=APP.users['${uid}'].products.filter(i=>i!==${pid});openUserModal('${uid}')">✕</span></span>`:''}).join('')||'<span style="color:var(--muted);font-size:12px">None yet</span>'}</div></div>`:''}
     </div>
     <div class="divider"></div>
@@ -2278,7 +2289,10 @@ async function saveUser(uid){
   const email=document.getElementById('u_email').value.trim().toLowerCase();
   const pwd=document.getElementById('u_pwd').value;
   const role=document.getElementById('u_role').value;
-  const ve=document.getElementById('u_ve')?.value||null;
+  // Collect selected editors from checkboxes (media_buyer role)
+  const vesSelected = role==='media_buyer'
+    ? Object.values(APP.users).filter(u=>u.role==='video_editor'&&document.getElementById('u_ve_'+u.id)?.checked).map(u=>u.id)
+    : [];
   const perms={}; allPerms.forEach(p=>{ const el=document.getElementById('perm_'+p); perms[p]=el&&el.classList.contains('on')?1:0; });
   if(!name||!email){ alert('Name and email required.'); return; }
   if(uid==='null'||uid===null){
@@ -2286,9 +2300,9 @@ async function saveUser(uid){
     if(!id){ alert('User ID required.'); return; }
     if(APP.users[id]){ alert('User ID already exists.'); return; }
     if(!pwd||pwd.length<6){ alert('Password must be at least 6 characters.'); return; }
-    const av=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-    const newUser={id,name,role,av,email,pwd,products:[],ve:role==='media_buyer'?(ve||null):null,active:true,perms};
-    await sb.from('users').insert([newUser]);
+    const av2=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    const newUser={id,name,role,av:av2,email,pwd,products:[],ves:vesSelected,active:true,perms};
+    await sb.from('users').insert([{...newUser}]);
     APP.users[id]=newUser;
     AV[id]='#'+Math.floor(Math.random()*8388607+4194304).toString(16);
     await logHistory('created','user',id,`Created user ${name} (${role.replace('_',' ')})`);
@@ -2300,11 +2314,11 @@ async function saveUser(uid){
     if(x.role!==role)changes.push(`role → "${role}"`);
     const upd={name,email,role,perms};
     if(pwd&&pwd.length>=6){upd.pwd=pwd;changes.push('password changed');}
-    if(role==='media_buyer')upd.ve=ve;
+    if(role==='media_buyer'){ upd.ves=vesSelected; changes.push(`editors: [${vesSelected.map(id=>APP.users[id]?.name).join(', ')}]`); }
     await sb.from('users').update(upd).eq('id',uid);
     x.name=name;x.email=email;x.role=role;x.perms=perms;
     if(pwd&&pwd.length>=6)x.pwd=pwd;
-    if(role==='media_buyer')x.ve=ve;
+    if(role==='media_buyer') x.ves=vesSelected;
     await logHistory('updated','user',uid,`Edited user ${name}${changes.length?' — '+changes.join(', '):''}`);
   }
   closeM2(); render();
