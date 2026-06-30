@@ -321,9 +321,29 @@ function reportToRow(r){ return { mb_id:r.mbId, product_id:r.productId, date:r.d
 // INITIAL DATA LOAD FROM SUPABASE
 // ══════════════════════════════════════════════════════════
 async function loadAllData(){
-  setLoad(10,'Loading users…');
-  const { data: usersData, error: ue } = await sb.from('users').select('*').order('id');
-  if(ue){ 
+  setLoad(15,'Connecting…');
+
+  // Fire all 6 requests in parallel instead of one-by-one — this is the main speed win,
+  // since each sequential await was adding its own network round-trip on top of the last.
+  const [
+    { data: usersData, error: ue },
+    { data: prodsData },
+    { data: tpData },
+    { data: tasksData },
+    { data: repsData },
+    { data: histData },
+  ] = await Promise.all([
+    sb.from('users').select('*').order('id'),
+    sb.from('products').select('*').order('id'),
+    sb.from('test_products').select('*').order('id'),
+    sb.from('tasks').select('*').order('id'),
+    sb.from('reports').select('*').order('id'),
+    sb.from('history').select('*').order('created_at',{ascending:false}).limit(500),
+  ]);
+
+  setLoad(70,'Preparing data…');
+
+  if(ue){
     console.error('users load failed — code:', ue.code, '— message:', ue.message, '— details:', ue.details, '— hint:', ue.hint);
     document.getElementById('loadMsg').textContent = 'DB Error: ' + (ue.message||ue.code||JSON.stringify(ue));
     document.getElementById('loadMsg').style.color = '#F87171';
@@ -333,25 +353,10 @@ async function loadAllData(){
     APP.users = {};
     usersData.forEach(r=>{ APP.users[r.id]=rowToUser(r); });
   }
-
-  setLoad(30,'Loading products…');
-  const { data: prodsData } = await sb.from('products').select('*').order('id');
   if(prodsData) APP.products = prodsData.map(rowToProduct);
-
-  setLoad(45,'Loading test products…');
-  const { data: tpData } = await sb.from('test_products').select('*').order('id');
   if(tpData) APP.testProducts = tpData.map(rowToTestProduct);
-
-  setLoad(60,'Loading tasks…');
-  const { data: tasksData } = await sb.from('tasks').select('*').order('id');
   if(tasksData){ APP.tasks = tasksData.map(rowToTask); APP.taskSeq = (Math.max(0,...APP.tasks.map(t=>t.id))||0)+1; }
-
-  setLoad(75,'Loading reports…');
-  const { data: repsData } = await sb.from('reports').select('*').order('id');
   if(repsData){ APP.reports = repsData.map(rowToReport); APP.reportSeq = (Math.max(0,...APP.reports.map(r=>r.id))||0)+1; }
-
-  setLoad(90,'Loading history…');
-  const { data: histData } = await sb.from('history').select('*').order('created_at',{ascending:false}).limit(500);
   if(histData) APP.history = histData.map(rowToHistory);
 
   setLoad(100,'Ready');
@@ -1368,28 +1373,26 @@ async function saveTestProduct(editId){
   // Auto-include current MB as assigned if not already
   if(me.role==='media_buyer'&&!assignedMBs.includes(me.id)) assignedMBs.push(me.id);
   if(editId==='null'||editId===null){
-    // Try with images first, fallback without if column missing
-    let row={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,test_results:[]};
-    let result = await sb.from('test_products').insert([{...row,images}]).select().single();
-    if(result.error&&result.error.message&&result.error.message.includes('images')){
-      // images column doesn't exist yet — insert without it
-      result = await sb.from('test_products').insert([row]).select().single();
+    let row={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,test_results:[],images};
+    let result = await sb.from('test_products').insert([row]).select().single();
+    if(result.error){
+      alert('Could not save: '+result.error.message+'\n\nIf this mentions the "images" column, run the SQL migration in Supabase first (add_images_column.sql), then try again.');
+      return;
     }
-    if(result.error){ alert('Error saving: '+result.error.message); return; }
     if(result.data){
       const tp=rowToTestProduct(result.data);
-      tp.images=images; // keep images in memory even if not in DB yet
       APP.testProducts.push(tp);
     }
     await logHistory('created','testproduct',result.data?.id||0,`Added test product "${name}" (${market})`);
   } else {
     const tp=APP.testProducts.find(p=>p.id===editId);
-    if(tp){ tp.name=name;tp.url=url;tp.market=market;tp.lang=lang;tp.notes=notes;tp.assignedMBs=assignedMBs;tp.status=status;tp.images=images; }
-    let upd={name,url,market,lang,notes,assigned_mbs:assignedMBs,status};
-    let res=await sb.from('test_products').update({...upd,images}).eq('id',editId);
-    if(res.error&&res.error.message&&res.error.message.includes('images')){
-      await sb.from('test_products').update(upd).eq('id',editId);
+    let upd={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,images};
+    let res=await sb.from('test_products').update(upd).eq('id',editId);
+    if(res.error){
+      alert('Could not save: '+res.error.message+'\n\nIf this mentions the "images" column, run the SQL migration in Supabase first (add_images_column.sql), then try again.');
+      return;
     }
+    if(tp){ tp.name=name;tp.url=url;tp.market=market;tp.lang=lang;tp.notes=notes;tp.assignedMBs=assignedMBs;tp.status=status;tp.images=images; }
     await logHistory('updated','testproduct',editId,`Edited test product "${name}" — status: ${status}`);
   }
   _tpFormImgs=[];
@@ -2832,7 +2835,7 @@ document.getElementById('mo2').addEventListener('click',function(e){ if(e.target
 (async function init(){
   try {
     await loadAllData();
-    await new Promise(r=>setTimeout(r,250));
+    await new Promise(r=>setTimeout(r,80));
     hideLoader();
     renderAuth();
   } catch(err){
