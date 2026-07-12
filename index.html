@@ -307,7 +307,7 @@ function hideLoader(){ document.getElementById('loadingOverlay').style.display='
 
 // ─── Row → APP format converters ───
 function rowToUser(r){ return { id:r.id, name:r.name, role:r.role, av:r.av, email:r.email, pwd:r.pwd, products:r.products||[], ves:(r.ves||[]).filter(Boolean), ve:null, active:r.active, perms:r.perms||{} }; }
-function rowToProduct(r){ return { id:r.id, name:r.name, market:r.market, lang:r.lang, cat:r.cat, url:r.url, images:r.images||[], angles:r.angles||[], hooks:r.hooks||[], rawVideo:r.raw_video||'', status:r.status||'High stock', priority:r.priority||'Medium', storeLinks:r.store_links||[], adImagesLink:r.ad_images_link||'', adsPlatforms:r.ads_platforms||[] }; }
+function rowToProduct(r){ return { id:r.id, name:r.name, market:r.market, lang:r.lang, cat:r.cat, url:r.url, images:r.images||[], angles:r.angles||[], hooks:r.hooks||[], rawVideo:r.raw_video||'', status:r.status||'High stock', priority:r.priority||'Medium', storeLinks:r.store_links||[], adImagesLink:r.ad_images_link||'', adsPlatforms:r.ads_platforms||[], isCod:r.is_cod||false }; }
 function rowToTestProduct(r){ return { id:r.id, name:r.name, url:r.url, market:r.market, lang:r.lang, notes:r.notes||'', assignedMBs:r.assigned_mbs||[], status:r.status||'testing', testResults:r.test_results||[], images:r.images||[], createdAt:r.created_at }; }
 function rowToTask(r){ return { id:r.id, productId:r.product_id, testProductId:r.test_product_id, taskDate:r.task_date, day:r.day, assignedMB:r.assigned_mb, assignedVE:r.assigned_ve, campaignType:r.campaign_type, videoType:r.video_type, voiceOver:r.voice_over, angle:r.angle, variants:r.variants||[], status:r.status, revisionNote:r.revision_note||'', mbNote:r.mb_note||'', managerApproval:r.manager_approval||'pending', deadlineDate:r.deadline_date, isTest:r.is_test||false, testProductName:r.test_product_name||'', testMarket:r.test_market||'', createdAt:r.created_at, updatedAt:r.updated_at }; }
 function rowToReport(r){ return { id:r.id, mbId:r.mb_id, productId:r.product_id, date:r.date, spend:r.spend, leads:r.leads, cpl:r.cpl, platform:r.platform||'Facebook Ads' }; }
@@ -1123,11 +1123,14 @@ function pgProducts(){
   let prods = canManage ? [...APP.products] : APP.products.filter(p=>ids.includes(p.id));
 
   // ── Filter state ──
-  if(!APP.prodFilter) APP.prodFilter = { status:'', priority:'', market:'' };
+  if(!APP.prodFilter) APP.prodFilter = { status:'', priority:'', market:'', cod:'' };
   if(APP.prodFilter.market===undefined) APP.prodFilter.market='';
+  if(APP.prodFilter.cod===undefined) APP.prodFilter.cod='';
   if(APP.prodFilter.status) prods = prods.filter(p=>(p.status||'High stock')===APP.prodFilter.status);
   if(APP.prodFilter.priority) prods = prods.filter(p=>(p.priority||'Medium')===APP.prodFilter.priority);
   if(APP.prodFilter.market) prods = prods.filter(p=>p.market===APP.prodFilter.market);
+  if(APP.prodFilter.cod==='cod') prods = prods.filter(p=>p.isCod);
+  if(APP.prodFilter.cod==='non-cod') prods = prods.filter(p=>!p.isCod);
 
   // ── Sort: High stock first, then by priority (High > Medium > Low), then by name ──
   const statusOrder = {'High stock':0,'Medium stock':1,'Low stock':2,'Out of stock':3,'Stop for now — Delivery rate too low':4};
@@ -1155,7 +1158,12 @@ function pgProducts(){
       <option value="">All markets</option>
       ${allProdMarkets.map(m=>`<option value="${m}" ${APP.prodFilter.market===m?'selected':''}>${m}</option>`).join('')}
     </select>
-    ${(APP.prodFilter.status||APP.prodFilter.priority||APP.prodFilter.market)?`<button class="btn btn-ghost btn-sm" onclick="APP.prodFilter={status:'',priority:'',market:''};render()">Clear ✕</button>`:''}
+    <select class="fi" style="width:auto;padding:6px 10px;font-size:12px" onchange="APP.prodFilter.cod=this.value;render()">
+      <option value="">All types</option>
+      <option value="cod" ${APP.prodFilter.cod==='cod'?'selected':''}>🚚 COD only</option>
+      <option value="non-cod" ${APP.prodFilter.cod==='non-cod'?'selected':''}>Non-COD only</option>
+    </select>
+    ${(APP.prodFilter.status||APP.prodFilter.priority||APP.prodFilter.market||APP.prodFilter.cod)?`<button class="btn btn-ghost btn-sm" onclick="APP.prodFilter={status:'',priority:'',market:'',cod:''};render()">Clear ✕</button>`:''}
     <span style="font-size:12px;color:var(--muted)">${prods.length} product${prods.length!==1?'s':''}</span>
     ${canManage?`<button class="btn btn-pri btn-sm" style="margin-left:auto" onclick="openProductForm()">+ Add Product</button>`:''}
   </div>`;
@@ -1174,7 +1182,7 @@ function pgProducts(){
         <div class="pcard-b">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px"><div class="pcard-n">${p.name}</div>${mchip(p.market)}</div>
           <div class="pcard-u">${p.url}</div>
-          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${chip(p.status||'High stock',STOCK_STATUS_STYLE[p.status]||'n')}${chip((p.priority||'Medium')+' priority',PRIORITY_STYLE[p.priority]||'n')}${(p.adsPlatforms||[]).map(pl=>chip(pl==='TikTok Ads'?'🎵 TikTok':'📘 Facebook','n')).join('')}</div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${chip(p.status||'High stock',STOCK_STATUS_STYLE[p.status]||'n')}${chip((p.priority||'Medium')+' priority',PRIORITY_STYLE[p.priority]||'n')}${p.isCod?'<span class="chip chip-a" style="font-weight:700">🚚 COD</span>':''}${(p.adsPlatforms||[]).map(pl=>chip(pl==='TikTok Ads'?'🎵 TikTok':'📘 Facebook','n')).join('')}</div>
           <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">${chip(p.cat,'n')}${chip(p.lang,'n')}${hasRaw?chip('Raw ✓','ok'):''}</div>
           <div class="pcard-a">${p.angles[0]||'No angles yet'}</div>
           <div style="display:flex;justify-content:space-between;align-items:center">
@@ -1232,68 +1240,110 @@ function pgTestProducts(){
 
   return filterBar + `
   ${myTP.length===0?`<div class="empty"><div class="empty-i">🧪</div><div class="empty-t">No test products${canManage?' added yet':' assigned to you'}</div></div>`:''}
+  <div class="pgrid">
   ${myTP.map(tp=>{
-    let testTasks=APP.tasks.filter(t=>t.testProductId===tp.id);
-    let results=tp.testResults||[];
-    if(tf.from){ testTasks=testTasks.filter(t=>t.taskDate>=tf.from); results=results.filter(r=>r.date>=tf.from); }
-    if(tf.to){ testTasks=testTasks.filter(t=>t.taskDate<=tf.to); results=results.filter(r=>r.date<=tf.to); }
-    const avgCpl=results.length&&results.reduce((s,r)=>s+r.leads,0)?+(results.reduce((s,r)=>s+r.spend,0)/results.reduce((s,r)=>s+r.leads,0)).toFixed(2):null;
-
-    return `<div class="card" style="margin-bottom:16px">
-      <div class="card-h">
-        <div style="display:flex;align-items:center;gap:12px">
-          <div style="width:40px;height:40px;background:var(--s100);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:20px;overflow:hidden">${tp.images&&tp.images.length?`<img src="${tp.images[0]}" style="width:100%;height:100%;object-fit:cover">`:'🧪'}</div>
-          <div>
-            <div style="font-size:15px;font-weight:700">${tp.name}</div>
-            <div style="display:flex;gap:6px;margin-top:3px">
-              <span class="chip chip-n">${tp.market}</span>
-              <span class="chip chip-n">${tp.lang||'English'}</span>
-              ${tp.status==='winner'?'<span class="chip chip-ok">Winner ✓</span>':tp.status==='rejected'?'<span class="chip chip-b">Rejected</span>':'<span class="chip chip-w">Testing</span>'}
-            </div>
+    const testTasks=APP.tasks.filter(t=>t.testProductId===tp.id);
+    const results=tp.testResults||[];
+    const totalSpend=results.reduce((s,r)=>s+(parseFloat(r.spend)||0),0).toFixed(2);
+    const totalLeads=results.reduce((s,r)=>s+(parseInt(r.leads)||0),0);
+    const avgCpl=totalLeads>0?+(totalSpend/totalLeads).toFixed(2):null;
+    const winners=testTasks.filter(t=>taskHasWinner(t)).length;
+    const hasImg=tp.images&&tp.images.length;
+    const statusStyle={winner:'ok',rejected:'b',testing:'w'};
+    const statusLabel={winner:'✓ Winner',rejected:'✗ Rejected',testing:'🧪 Testing'};
+    return `<div class="pcard" onclick="openTestProductDetail(${tp.id})" style="cursor:pointer">
+      <div class="pcard-img">${hasImg?`<img src="${tp.images[0]}">`:'🧪'}</div>
+      <div class="pcard-b">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px">
+          <div class="pcard-n">${tp.name}</div>${mchip(tp.market)}
+        </div>
+        <div class="pcard-u">${tp.url}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+          ${chip(statusLabel[tp.status||'testing'],statusStyle[tp.status||'testing'])}
+          ${chip(tp.lang||'English','n')}
+        </div>
+        ${tp.notes?`<div style="font-size:11px;color:var(--sub);margin-bottom:8px;line-height:1.4">${tp.notes.slice(0,70)}${tp.notes.length>70?'…':''}</div>`:''}
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:10px;color:var(--muted)">
+            <b style="color:var(--ink)">${testTasks.length}</b> tasks
+            ${results.length?` · <b style="color:var(--ink)">$${totalSpend}</b> spend · <b style="color:var(--ink)">${totalLeads}</b> leads`:''}
+            ${avgCpl?` · CPL <b style="color:${avgCpl<=2?'var(--ok)':avgCpl<=4?'var(--warn)':'var(--bad)'}">$${avgCpl}</b>`:''}
+            ${winners>0?` · <b style="color:var(--ok)">${winners} win</b>`:''}
           </div>
-        </div>
-        <div style="display:flex;gap:8px">
-          ${canManage?`<button class="btn btn-out btn-sm" onclick="openTestProductForm(${tp.id})">Edit</button>`:''}
-          ${isMB?`<button class="btn btn-pri btn-sm" onclick="openTestResultModal(${tp.id})">+ Log Result</button>`:''}
-        </div>
-      </div>
-      <div class="card-b">
-        ${tp.images&&tp.images.length?`<div class="imgs" style="grid-template-columns:repeat(auto-fill,minmax(64px,1fr));margin-bottom:14px">${tp.images.map(s=>`<div class="imw"><img src="${s}"></div>`).join('')}</div>`:''}
-        <div style="display:flex;gap:14px;margin-bottom:14px;flex-wrap:wrap">
-          <div><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Product link</div><a href="${tp.url}" target="_blank" style="font-size:12px">${tp.url}</a></div>
-          ${tp.notes?`<div style="flex:1"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:2px">Notes</div><div style="font-size:12px;color:var(--sub)">${tp.notes}</div></div>`:''}
-        </div>
-
-        ${canManage&&tp.assignedMBs?.length?`<div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:5px">Assigned to</div><div>${tp.assignedMBs.map(id=>`<span style="display:inline-flex;align-items:center;gap:5px;margin-right:8px">${av(id,20)}<span style="font-size:12px">${APP.users[id]?.name||id}</span></span>`).join('')}</div></div>`:''}
-
-        <div class="g2">
-          <div>
-            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Test Tasks (${testTasks.length})</div>
-            ${testTasks.length?`<table style="width:100%;border-collapse:collapse">${testTasks.slice(0,5).map(t=>`<tr style="border-bottom:1px solid var(--border)">
-              <td style="padding:6px 0;font-size:12px"><b>${APP.users[t.assignedVE]?.name||'?'}</b></td>
-              <td style="padding:6px 0">${sChip(t.status)}</td>
-              <td style="padding:6px 0">${fmtDate(t.taskDate)}</td>
-              <td style="padding:6px 0"><button class="btn btn-out btn-xs" onclick="openTask(${t.id})">Open</button></td>
-            </tr>`).join('')}</table>`:`<div style="color:var(--muted);font-size:12px">No tasks assigned yet</div>`}
-          </div>
-          <div>
-            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Test Results${avgCpl?` · Avg CPL $${avgCpl}`:''}</div>
-            ${results.length?`<table style="width:100%;border-collapse:collapse">
-              <tr style="background:var(--s50)"><td style="padding:5px 8px;font-size:10px;font-weight:700;color:var(--muted)">Date</td><td style="padding:5px 8px;font-size:10px;font-weight:700;color:var(--muted)">Spend</td><td style="padding:5px 8px;font-size:10px;font-weight:700;color:var(--muted)">Leads</td><td style="padding:5px 8px;font-size:10px;font-weight:700;color:var(--muted)">CPL</td></tr>
-              ${results.slice(0,6).map(r=>`<tr style="border-bottom:1px solid var(--border)">
-                <td style="padding:6px 8px;font-size:12px">${fmtDate(r.date)}</td>
-                <td style="padding:6px 8px;font-size:12px">$${r.spend}</td>
-                <td style="padding:6px 8px;font-size:12px">${r.leads}</td>
-                <td style="padding:6px 8px;font-size:12px;font-weight:700;color:${r.cpl<=2?'var(--ok)':r.cpl<=4?'var(--warn)':'var(--bad)'}">$${r.cpl}</td>
-              </tr>`).join('')}
-            </table>`:`<div style="color:var(--muted);font-size:12px">No results logged yet</div>`}
+          <div style="display:flex;gap:5px">
+            ${isMB?`<button class="btn btn-pri btn-xs" onclick="event.stopPropagation();openTestResultModal(${tp.id})">+ Result</button>`:''}
+            ${canManage?`<button class="btn btn-out btn-xs" onclick="event.stopPropagation();openTestProductForm(${tp.id})">Edit</button>`:''}
           </div>
         </div>
       </div>
     </div>`;
-  }).join('')}`;
+  }).join('')}
+  </div>`;
 }
 
+function openTestProductDetail(id){
+  const tp=APP.testProducts.find(p=>p.id===id); if(!tp)return;
+  const me=u();
+  const canManage=me.role==='admin'||me.role==='product_lister';
+  const isMB=me.role==='media_buyer';
+  const testTasks=APP.tasks.filter(t=>t.testProductId===id);
+  const results=tp.testResults||[];
+  const totalSpend=results.reduce((s,r)=>s+(parseFloat(r.spend)||0),0).toFixed(2);
+  const totalLeads=results.reduce((s,r)=>s+(parseInt(r.leads)||0),0);
+  const avgCpl=totalLeads>0?+(totalSpend/totalLeads).toFixed(2):null;
+  const statusStyle={winner:'ok',rejected:'b',testing:'w'};
+  const statusLabel={winner:'✓ Winner',rejected:'✗ Rejected',testing:'🧪 Testing'};
+  document.getElementById('md2').innerHTML=`
+  <div class="mh">
+    <div style="flex:1;min-width:0">
+      <div class="mt">${tp.name}</div>
+      <div style="display:flex;gap:6px;margin-top:5px;flex-wrap:wrap">
+        ${mchip(tp.market)}${chip(tp.lang||'English','n')}${chip(statusLabel[tp.status||'testing'],statusStyle[tp.status||'testing'])}
+      </div>
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">Product link</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <a href="${tp.url}" target="_blank" style="font-size:12px;color:var(--accent);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${tp.url}</a>
+          <a href="${tp.url}" target="_blank" class="btn btn-out btn-xs">Open ↗</a>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-shrink:0">
+      ${isMB?`<button class="btn btn-pri btn-sm" onclick="closeM2();openTestResultModal(${id})">+ Log Result</button>`:''}
+      ${canManage?`<button class="btn btn-out btn-sm" onclick="closeM2();openTestProductForm(${id})">Edit</button>`:''}
+      <button class="btn btn-out btn-sm" onclick="closeM2()">✕</button>
+    </div>
+  </div>
+  <div class="mb">
+    ${tp.images&&tp.images.length?`<div class="imgs" style="grid-template-columns:repeat(auto-fill,minmax(72px,1fr));margin-bottom:16px">${tp.images.map(s=>`<div class="imw"><img src="${s}"></div>`).join('')}</div>`:''}
+    ${tp.notes?`<div class="al al-i" style="margin-bottom:16px"><i>💡</i><div>${tp.notes}</div></div>`:''}
+    ${canManage&&tp.assignedMBs?.length?`<div style="margin-bottom:16px"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:7px">Assigned media buyers</div><div style="display:flex;gap:8px;flex-wrap:wrap">${tp.assignedMBs.map(id=>`<span style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;background:var(--s50);border-radius:7px">${av(id,20)}<span style="font-size:12px;font-weight:600">${APP.users[id]?.name||id}</span></span>`).join('')}</div></div>`:''}
+    <div class="g2">
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:10px">Test tasks (${testTasks.length})</div>
+        ${testTasks.length?testTasks.map(t=>`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+          <div style="flex:1"><div style="font-size:12px;font-weight:600">${fmtDate(t.taskDate)}</div><div style="font-size:11px;color:var(--muted)">${APP.users[t.assignedVE]?.name||'?'}</div></div>
+          ${sChip(t.status)}
+          <button class="btn btn-out btn-xs" onclick="closeM2();openTask(${t.id})">Open</button>
+        </div>`).join(''):`<div style="font-size:12px;color:var(--muted)">No tasks yet</div>`}
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:10px">
+          Test results${avgCpl?` · Avg CPL <b style="color:${avgCpl<=2?'var(--ok)':avgCpl<=4?'var(--warn)':'var(--bad)'}">$${avgCpl}</b>`:''}
+        </div>
+        ${results.length?`<div style="margin-bottom:8px;font-size:12px;color:var(--muted)">Total: <b style="color:var(--ink)">$${totalSpend}</b> spend · <b style="color:var(--ink)">${totalLeads}</b> leads</div>`:''}
+        ${results.length?results.map(r=>`<div style="display:flex;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px">
+          <span style="color:var(--muted)">${fmtDate(r.date)}</span>
+          <span>$${r.spend}</span>
+          <span>${r.leads} leads</span>
+          <b style="color:${(r.cpl||0)<=2?'var(--ok)':(r.cpl||0)<=4?'var(--warn)':'var(--bad)'}">$${r.cpl||0}</b>
+          ${r.platform?`<span style="color:var(--muted)">${r.platform==='TikTok Ads'?'🎵':'📘'}</span>`:''}
+        </div>`).join(''):`<div style="font-size:12px;color:var(--muted)">No results logged yet</div>`}
+      </div>
+    </div>
+  </div>`;
+  openM2();
+}
 let _tpFormImgs=[];
 function tpImgSel(e){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>{_tpFormImgs.push(ev.target.result);tpImgGrid();};r.readAsDataURL(f);}); }
 function tpImgDrop(e){ e.preventDefault(); tpImgSel({target:{files:e.dataTransfer.files}}); }
@@ -1433,12 +1483,13 @@ async function saveTestResult(tpId){
   const tp=APP.testProducts.find(p=>p.id===tpId);
   if(!tp)return;
   const date=document.getElementById('tr_date')?.value;
-  const spend=parseFloat(document.getElementById('tr_spend')?.value);
-  const leads=parseInt(document.getElementById('tr_leads')?.value);
+  const spend=parseFloat(document.getElementById('tr_spend')?.value)||0;
+  const leads=parseInt(document.getElementById('tr_leads')?.value)||0;
   const notes=document.getElementById('tr_notes')?.value?.trim();
-  if(!date||!(spend>=0)||!(leads>0)){alert('Fill all required fields.');return;}
+  if(!date||!(spend>=0)){alert('Please enter a date and spend amount.');return;}
+  const cpl = leads>0 ? +(spend/leads).toFixed(2) : 0;
   if(!tp.testResults)tp.testResults=[];
-  tp.testResults.push({date,spend,leads,cpl:+(spend/leads).toFixed(2),notes,mbId:APP.me});
+  tp.testResults.push({date,spend,leads,cpl,notes,mbId:APP.me});
   await sb.from('test_products').update({test_results:tp.testResults}).eq('id',tpId);
   closeM1(); render();
 }
@@ -2228,7 +2279,7 @@ function openReportModal(){
     <div class="fg"><label class="fl">Date <span class="rq">*</span></label><input class="fi" id="r_date" type="date" value="${today}"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div class="fg" style="flex:1;min-width:120px"><label class="fl">Spend ($) <span class="rq">*</span></label><input class="fi" id="r_spend" type="number" min="0" step="0.01" placeholder="0.00" oninput="calcCpl()"></div>
-      <div class="fg" style="flex:1;min-width:120px"><label class="fl">Leads <span class="rq">*</span></label><input class="fi" id="r_leads" type="number" min="0" placeholder="0" oninput="calcCpl()"></div>
+      <div class="fg" style="flex:1;min-width:120px"><label class="fl">Leads <span style="font-weight:400;color:var(--muted);font-size:10px">(0 if none)</span></label><input class="fi" id="r_leads" type="number" min="0" placeholder="0" oninput="calcCpl()"></div>
     </div>
     <div style="background:var(--s50);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;margin-top:6px">
       <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Cost per lead (auto)</div>
@@ -2242,7 +2293,9 @@ function calcCpl(){
   const s=parseFloat(document.getElementById('r_spend')?.value||0);
   const l=parseFloat(document.getElementById('r_leads')?.value||0);
   const out=document.getElementById('cplOut');
-  out.textContent = (s>0&&l>0)?'$'+(s/l).toFixed(2):'$—';
+  if(!out)return;
+  out.textContent = (s>0&&l>0)?'$'+(s/l).toFixed(2):l===0&&s>0?'No leads':'$—';
+  out.style.color = l===0&&s>0?'var(--warn)':'var(--accent)';
 }
 async function saveReport(){
   const me=u();
@@ -2251,20 +2304,21 @@ async function saveReport(){
   const pid=parseInt(rawPid.slice(2));
   const date=document.getElementById('r_date').value;
   const spend=parseFloat(document.getElementById('r_spend').value);
-  const leads=parseInt(document.getElementById('r_leads').value);
+  const leads=parseInt(document.getElementById('r_leads').value)||0;
   const platform=document.querySelector('input[name="r_platform"]:checked')?.value||'Facebook Ads';
-  if(!rawPid||!date||!(spend>=0)||!(leads>0)){ alert('Fill all fields. Leads must be greater than 0.'); return; }
+  if(!rawPid||!date||!(spend>=0)){ alert('Fill all required fields.'); return; }
+  const cpl = leads>0 ? +(spend/leads).toFixed(2) : 0;
 
   if(isTest){
     const tp=APP.testProducts.find(p=>p.id===pid);
     if(!tp)return;
     if(!tp.testResults)tp.testResults=[];
-    tp.testResults.push({date,spend,leads,cpl:+(spend/leads).toFixed(2),notes:'',mbId:me.id,platform});
+    tp.testResults.push({date,spend,leads,cpl,notes:'',mbId:me.id,platform});
     await sb.from('test_products').update({test_results:tp.testResults}).eq('id',pid);
     await logHistory('created','report',pid,`${me.name} logged test result for "${tp.name}" — $${spend} spend, ${leads} leads (${platform})`);
   } else {
-    const { data } = await sb.from('reports').insert([{mb_id:me.id,product_id:pid,date,spend,leads,cpl:+(spend/leads).toFixed(2),platform}]).select().single();
-    if(data) APP.reports.push({id:data.id,mbId:me.id,productId:pid,date,spend,leads,cpl:data.cpl,platform});
+    const { data } = await sb.from('reports').insert([{mb_id:me.id,product_id:pid,date,spend,leads,cpl,platform}]).select().single();
+    if(data) APP.reports.push({id:data.id,mbId:me.id,productId:pid,date,spend,leads,cpl,platform});
     await logHistory('created','report',data?.id||0,`${me.name} logged report for "${pr(pid)?.name||'product'}" — $${spend} spend, ${leads} leads (${platform})`);
   }
   closeM1(); render();
@@ -2492,7 +2546,7 @@ function openProductModal(pid){
   <div class="mh">
     <div style="flex:1;min-width:0">
       <div class="mt">${p.name}</div>
-      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${mchip(p.market)}${chip(p.lang,'n')}${chip(p.cat,'n')}${chip(p.status||'High stock',STOCK_STATUS_STYLE[p.status]||'n')}${chip((p.priority||'Medium')+' priority',PRIORITY_STYLE[p.priority]||'n')}${(p.adsPlatforms||[]).map(pl=>chip(pl==='TikTok Ads'?'🎵 TikTok Ads':'📘 Facebook Ads','a')).join('')}</div>
+      <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${mchip(p.market)}${chip(p.lang,'n')}${chip(p.cat,'n')}${chip(p.status||'High stock',STOCK_STATUS_STYLE[p.status]||'n')}${chip((p.priority||'Medium')+' priority',PRIORITY_STYLE[p.priority]||'n')}${p.isCod?'<span class="chip chip-a" style="font-weight:700">🚚 COD</span>':''}${(p.adsPlatforms||[]).map(pl=>chip(pl==='TikTok Ads'?'🎵 TikTok Ads':'📘 Facebook Ads','a')).join('')}</div>
       ${linksBlock}
     </div>
     <div style="display:flex;gap:8px;flex-shrink:0">${canManage?`<button class="btn btn-out btn-sm" onclick="closeM2();openProductForm(${pid})">Edit</button>`:''}<button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
@@ -2563,10 +2617,10 @@ function prodTabContent(t,pid){
         +'</tbody></table></div>':'<div class="empty"><div class="empty-t">No reports logged for this product yet</div></div>');
   }
   if(t==='v'){
-    // Aggregate all video links uploaded for this product across all tasks
-    const pTasks = APP.tasks.filter(t=>t.productId===pid && !t.isTest);
+    const me2=u();
+    const canReview = me2.role==='media_buyer'||me2.role==='admin';
+    const pTasks = APP.tasks.filter(tk=>tk.productId===pid && !tk.isTest);
     if(!pTasks.length) return `<div class="empty"><div class="empty-i">🎬</div><div class="empty-t">No tasks assigned for this product yet</div></div>`;
-    // Group by angle
     const byAngle = {};
     pTasks.forEach(task=>{
       const angle = task.angle||'—';
@@ -2574,38 +2628,57 @@ function prodTabContent(t,pid){
       (task.variants||[]).forEach((v,vi)=>{
         if(v.videoLink){
           byAngle[angle].push({
-            hook: v.hook||`Hook ${vi+1}`,
-            videoLink: v.videoLink,
-            revisionLink: v.revisionLink||null,
-            mbResult: v.mbResult||'pending',
-            uploadedAt: v.uploadedAt||null,
-            taskDate: task.taskDate,
-            veId: task.assignedVE,
-            taskId: task.id,
+            hook:v.hook||`Hook ${vi+1}`,
+            videoLink:v.videoLink, revisionLink:v.revisionLink||null,
+            mbResult:v.mbResult||'pending', adResult:v.adResult||'pending',
+            uploadedAt:v.uploadedAt||null, taskDate:task.taskDate,
+            veId:task.assignedVE, taskId:task.id, variantIdx:vi,
           });
         }
       });
     });
-    const totalVideos = Object.values(byAngle).reduce((s,a)=>s+a.length,0);
+    const allVideos = Object.values(byAngle).flat();
+    const totalVideos = allVideos.length;
+    const winners = allVideos.filter(v=>v.adResult==='winner').length;
+    const losers  = allVideos.filter(v=>v.adResult==='loser').length;
+    const untested= allVideos.filter(v=>!v.adResult||v.adResult==='pending').length;
     if(!totalVideos) return `<div class="empty"><div class="empty-i">🎬</div><div class="empty-t">No videos uploaded yet for this product</div></div>`;
     return `
-      <div style="font-size:12px;color:var(--muted);margin-bottom:16px"><b style="color:var(--ink)">${totalVideos} video${totalVideos>1?'s':''}</b> uploaded across ${Object.keys(byAngle).length} angle${Object.keys(byAngle).length>1?'s':''}</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        <div style="padding:8px 14px;background:var(--ok-bg);border:1px solid var(--ok-bd);border-radius:8px;font-size:12px"><b style="font-size:16px;display:block">${winners}</b>Winners</div>
+        <div style="padding:8px 14px;background:var(--bad-bg,#FEF2F2);border:1px solid var(--bad-bd,#FECACA);border-radius:8px;font-size:12px"><b style="font-size:16px;display:block">${losers}</b>Losers</div>
+        <div style="padding:8px 14px;background:var(--s50);border:1px solid var(--border);border-radius:8px;font-size:12px"><b style="font-size:16px;display:block">${untested}</b>Not tested</div>
+        <div style="padding:8px 14px;background:var(--s50);border:1px solid var(--border);border-radius:8px;font-size:12px"><b style="font-size:16px;display:block">${totalVideos}</b>Total</div>
+      </div>
       ${Object.entries(byAngle).map(([angle,videos])=>`
         <div style="margin-bottom:20px">
-          <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;padding:7px 10px;background:var(--accent-bg);border-radius:7px">${angle}</div>
-          ${videos.map(v=>`
-            <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:${v.mbResult==='approved'?'var(--ok-bg)':v.mbResult==='needs_revision'?'var(--warn-bg)':'#fff'}">
-              <div style="flex:1;min-width:0">
-                <div style="font-size:12px;font-weight:600;margin-bottom:2px">${escHtml(v.hook)}</div>
-                <div style="font-size:11px;color:var(--muted)">${av(v.veId,16)} ${APP.users[v.veId]?.name||'?'} · ${fmtDate(v.taskDate)}</div>
+          <div style="font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;padding:7px 10px;background:var(--accent-bg);border-radius:7px">${escHtml(angle)}</div>
+          ${videos.map(v=>{
+            const adBg = v.adResult==='winner'?'var(--ok-bg)':v.adResult==='loser'?'#FEF2F2':v.mbResult==='approved'?'var(--s50)':'#fff';
+            const adBorder = v.adResult==='winner'?'var(--ok-bd)':v.adResult==='loser'?'#FECACA':'var(--border)';
+            return `<div style="padding:11px 14px;border:1.5px solid ${adBorder};border-radius:9px;margin-bottom:8px;background:${adBg}">
+              <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:12px;font-weight:600;margin-bottom:2px">${escHtml(v.hook)}</div>
+                  <div style="font-size:11px;color:var(--muted)">${av(v.veId,16)} ${APP.users[v.veId]?.name||'?'} · ${fmtDate(v.taskDate)}</div>
+                </div>
+                <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;flex-shrink:0">
+                  ${v.mbResult==='approved'?chip('✓ Approved','ok'):v.mbResult==='needs_revision'?chip('⟲ Revision','w'):chip('Pending review','n')}
+                  <a href="${v.videoLink}" target="_blank" class="btn btn-out btn-xs">Video ↗</a>
+                  ${v.revisionLink?`<a href="${v.revisionLink}" target="_blank" class="btn btn-ghost btn-xs">Revised ↗</a>`:''}
+                </div>
               </div>
-              <div style="display:flex;gap:6px;align-items:center">
-                ${v.mbResult==='approved'?chip('Approved','ok'):v.mbResult==='needs_revision'?chip('Revision','w'):''}
-                ${v.adResult==='winner'?chip('Winner','ok'):v.adResult==='loser'?chip('Loser','b'):''}
-                <a href="${v.videoLink}" target="_blank" class="btn btn-out btn-xs">Video &#8599;</a>
-                ${v.revisionLink?`<a href="${v.revisionLink}" target="_blank" class="btn btn-ghost btn-xs">Revised &#8599;</a>`:''}
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px">Ad result:</span>
+                ${v.adResult==='winner'?`<span style="font-size:13px;font-weight:700;color:var(--ok)">🏆 Winner</span>`:v.adResult==='loser'?`<span style="font-size:13px;font-weight:700;color:#EF4444">✗ Loser</span>`:`<span style="font-size:12px;color:var(--muted)">Not tested yet</span>`}
+                ${canReview?`<div style="display:flex;gap:5px;margin-left:auto">
+                  <button class="btn btn-xs ${v.adResult==='winner'?'btn-pri':'btn-out'}" onclick="setVideoAdResult(${v.taskId},${v.variantIdx},'winner',${pid})">Winner</button>
+                  <button class="btn btn-xs ${v.adResult==='loser'?'btn-bad':'btn-out'}" onclick="setVideoAdResult(${v.taskId},${v.variantIdx},'loser',${pid})">Loser</button>
+                  <button class="btn btn-ghost btn-xs" onclick="setVideoAdResult(${v.taskId},${v.variantIdx},'pending',${pid})">Reset</button>
+                </div>`:''}
               </div>
-            </div>`).join('')}
+            </div>`;
+          }).join('')}
         </div>`).join('')}`;
   }
   if(t==='a'){
@@ -2660,6 +2733,18 @@ H02 Leaking pipe at 2AM? Fixed in 10 min
       +'<div style="flex:1;min-width:0"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">'+(has?'Raw clips available':'No clips uploaded')+'</div>'+linkEl+'</div>'
       +openBtn+'</div>'+editSection;
   }
+}
+async function setVideoAdResult(taskId, variantIdx, result, pid){
+  const t=APP.tasks.find(x=>x.id===taskId);
+  if(!t||!t.variants[variantIdx]) return;
+  t.variants[variantIdx].adResult=result;
+  // Recompute task-level status
+  const approved=t.variants.filter(v=>v.mbResult==='approved');
+  if(approved.length>0&&approved.every(v=>v.adResult==='winner'||v.adResult==='loser')){
+    // all reviewed variants have an ad result
+  }
+  await sb.from('tasks').update({variants:t.variants}).eq('id',taskId);
+  prodTab('v',pid); // refresh the Videos tab in-place
 }
 async function saveInlineAngles(pid){
   const angles=parseLines(document.getElementById('inline_angles_'+pid).value);
@@ -2727,6 +2812,15 @@ function openProductForm(editId=null){
         </label>`).join('')}
       </div>
     </div>
+    <div class="fg">
+      <label class="fl">Order type</label>
+      <label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:2px solid ${isEdit&&p.isCod?'var(--accent)':'var(--border)'};border-radius:9px;cursor:pointer;width:fit-content;font-size:13px;font-weight:600;background:${isEdit&&p.isCod?'var(--accent-bg)':'#fff'}">
+        <input type="checkbox" id="p_is_cod" ${isEdit&&p.isCod?'checked':''} style="width:16px;height:16px;cursor:pointer"
+          onchange="this.parentElement.style.borderColor=this.checked?'var(--accent)':'var(--border)';this.parentElement.style.background=this.checked?'var(--accent-bg)':'#fff'">
+        🚚 COD — Cash On Delivery
+      </label>
+      <div style="font-size:11px;color:var(--muted);margin-top:5px">Mark this product as a COD product (payment collected on delivery)</div>
+    </div>
     <div class="divider"></div>
     <div class="sec-t"><span class="sec-n">1</span> Other stores selling this product <span style="font-weight:400;text-transform:none;color:var(--muted)">(optional)</span></div>
     <div class="al al-i"><i>💡</i><div>If this product is also listed on other stores/websites, add each one with its store name and link.</div></div>
@@ -2784,21 +2878,22 @@ async function saveProduct(editId){
   const status=document.getElementById('p_status').value;
   const priority=document.getElementById('p_priority').value;
   const adsPlatforms=['Facebook Ads','TikTok Ads'].filter(pl=>document.getElementById('p_plt_'+pl.replace(' ','_'))?.checked);
+  const isCod = document.getElementById('p_is_cod')?.checked||false;
   const storeLinks=_formStoreLinks.filter(sl=>sl.store?.trim()||sl.url?.trim());
   const angles=parseLines(document.getElementById('p_angles').value);
   const hooks=parseLines(document.getElementById('p_hooks').value);
   if(!name||!url){ alert('Name and URL required.'); return; }
   if(editId==='null'||editId===null){
-    const row={name,url,cat,market,lang,images:[..._formImgs],angles,hooks,raw_video:'',status,priority,store_links:storeLinks,ads_platforms:adsPlatforms};
+    const row={name,url,cat,market,lang,images:[..._formImgs],angles,hooks,raw_video:'',status,priority,store_links:storeLinks,ads_platforms:adsPlatforms,is_cod:isCod};
     const { data } = await sb.from('products').insert([row]).select().single();
     if(data) APP.products.push(rowToProduct(data));
-    await logHistory('created','product',data?.id||0,`Added product "${name}" (${market}) — ${angles.length} angles, ${hooks.length} hooks, priority: ${priority}`);
+    await logHistory('created','product',data?.id||0,`Added product "${name}" (${market}) — ${isCod?'COD · ':''}${angles.length} angles, priority: ${priority}`);
   } else {
     const p2=pr(editId);
-    const upd={name,url,cat,market,lang,status,priority,images:[..._formImgs],store_links:storeLinks,ads_platforms:adsPlatforms};
+    const upd={name,url,cat,market,lang,status,priority,images:[..._formImgs],store_links:storeLinks,ads_platforms:adsPlatforms,is_cod:isCod};
     if(angles.length)upd.angles=angles; if(hooks.length)upd.hooks=hooks;
     await sb.from('products').update(upd).eq('id',editId);
-    p2.name=name;p2.url=url;p2.cat=cat;p2.market=market;p2.lang=lang;p2.status=status;p2.priority=priority;p2.images=[..._formImgs];p2.storeLinks=storeLinks;p2.adsPlatforms=adsPlatforms;
+    p2.name=name;p2.url=url;p2.cat=cat;p2.market=market;p2.lang=lang;p2.status=status;p2.priority=priority;p2.images=[..._formImgs];p2.storeLinks=storeLinks;p2.adsPlatforms=adsPlatforms;p2.isCod=isCod;
     if(angles.length)p2.angles=angles; if(hooks.length)p2.hooks=hooks;
     await logHistory('updated','product',editId,`Edited product "${name}" — status: ${status}, priority: ${priority}`);
   }
