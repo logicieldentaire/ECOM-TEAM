@@ -642,18 +642,65 @@ async function login(){
   if(btn){ btn.textContent='Signing in…'; btn.disabled=true; }
   const e=document.getElementById('le').value.trim().toLowerCase();
   const p=document.getElementById('lp').value;
-  // Look up user in Supabase
-  const { data: users, error } = await sb.from('users').select('*').eq('email',e).eq('pwd',p).eq('active',true);
-  if(error||!users||users.length===0){ renderAuth('Invalid email or password.'); return; }
-  const f = users[0];
+  // If data not loaded yet, load it now
+  if(!Object.keys(APP.users).length){
+    try{ await loadAllData(); }catch(err){ renderAuth('Connection error — reload.'); return; }
+  }
+  // Find user locally (avoid extra round-trip)
+  const f = Object.values(APP.users).find(u=>u.email===e&&u.pwd===p&&u.active!==false);
+  if(!f){ renderAuth('Invalid email or password.'); return; }
   APP.me=f.id; APP.authed=true;
+  saveSession(f.id);
   APP.page = f.role==='product_lister' ? 'products' : 'dashboard';
   APP.dashUser=f.role==='admin'?(Object.values(APP.users).find(x=>x.role==='video_editor')?.id||null):null;
   document.getElementById('auth').style.display='none';
   document.getElementById('app').style.display='flex';
   render();
+  startSync();
 }
-function logout(){ APP.authed=false; APP.me=null; document.getElementById('app').style.display='none'; document.getElementById('auth').style.display=''; closeM1(); closeM2(); renderAuth(); }
+// ─── Real-time sync (poll every 30s) ───
+let _syncInterval = null;
+async function syncData(){
+  if(!APP.authed) return;
+  try {
+    const [
+      {data:tasksData}, {data:repsData}, {data:tpData}, {data:prodsData}
+    ] = await Promise.all([
+      sb.from('tasks').select('*').order('id'),
+      sb.from('reports').select('*').order('id'),
+      sb.from('test_products').select('*').order('id'),
+      sb.from('products').select('*').order('id'),
+    ]);
+    let changed = false;
+    if(tasksData){ APP.tasks=tasksData.map(rowToTask); APP.taskSeq=(Math.max(0,...APP.tasks.map(t=>t.id))||0)+1; changed=true; }
+    if(repsData){ APP.reports=repsData.map(rowToReport); changed=true; }
+    if(tpData){ APP.testProducts=tpData.map(rowToTestProduct); changed=true; }
+    if(prodsData){ APP.products=prodsData.map(rowToProduct); changed=true; }
+    if(changed && APP.authed && !document.getElementById('mo1').style.display?.includes('flex') && !document.getElementById('mo2').style.display?.includes('flex')){
+      render(); // only re-render if no modal is open
+    }
+  } catch(e){ console.warn('Sync error:', e); }
+}
+function startSync(){
+  if(_syncInterval) clearInterval(_syncInterval);
+  _syncInterval = setInterval(syncData, 30000); // every 30 seconds
+}
+function stopSync(){
+  if(_syncInterval){ clearInterval(_syncInterval); _syncInterval=null; }
+}
+const SESSION_KEY = 'ecomteam_session';
+function saveSession(userId){ try{ localStorage.setItem(SESSION_KEY, userId); }catch(e){} }
+function loadSession(){ try{ return localStorage.getItem(SESSION_KEY)||null; }catch(e){ return null; } }
+function clearSession(){ try{ localStorage.removeItem(SESSION_KEY); }catch(e){} }
+
+function logout(){
+  clearSession();
+  stopSync();
+  APP.authed=false; APP.me=null;
+  document.getElementById('app').style.display='none';
+  document.getElementById('auth').style.display='';
+  closeM1(); closeM2(); renderAuth();
+}
 
 // ══════════════════════════════════════════════════════════
 // SHELL
@@ -1414,36 +1461,34 @@ async function saveTestProduct(editId){
   const url=document.getElementById('tp_url')?.value?.trim();
   const market=document.getElementById('tp_market')?.value;
   const lang=document.getElementById('tp_lang')?.value;
-  const notes=document.getElementById('tp_notes')?.value?.trim();
-  let assignedMBs=JSON.parse(document.getElementById('tp_mbs')?.value||'[]');
+  const notes=document.getElementById('tp_notes')?.value?.trim()||'';
+  let assignedMBs=[];
+  try{ assignedMBs=JSON.parse(document.getElementById('tp_mbs')?.value||'[]'); }catch(e){}
   const status=document.getElementById('tp_status')?.value||'testing';
   const images=[..._tpFormImgs];
-  if(!name||!url){ alert('Name and URL required.'); return; }
+  if(!name){ alert('Product name is required.'); return; }
+  if(!url){ alert('Product URL is required.'); return; }
   const me=u();
-  // Auto-include current MB as assigned if not already
+  // Auto-include current MB
   if(me.role==='media_buyer'&&!assignedMBs.includes(me.id)) assignedMBs.push(me.id);
-  if(editId==='null'||editId===null){
-    let row={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,test_results:[],images};
-    let result = await sb.from('test_products').insert([row]).select().single();
-    if(result.error){
-      alert('Could not save: '+result.error.message+'\n\nIf this mentions the "images" column, run the SQL migration in Supabase first (add_images_column.sql), then try again.');
-      return;
-    }
-    if(result.data){
-      const tp=rowToTestProduct(result.data);
-      APP.testProducts.push(tp);
-    }
-    await logHistory('created','testproduct',result.data?.id||0,`Added test product "${name}" (${market})`);
+  const isNew = editId===null||editId==='null';
+  if(isNew){
+    const row={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,test_results:[],images};
+    const {data,error} = await sb.from('test_products').insert([row]).select().single();
+    if(error){ alert('Could not save: '+error.message); return; }
+    if(data) APP.testProducts.push(rowToTestProduct(data));
+    await logHistory('created','testproduct',data?.id||0,`Added test product "${name}" (${market})`);
   } else {
-    const tp=APP.testProducts.find(p=>p.id===editId);
-    let upd={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,images};
-    let res=await sb.from('test_products').update(upd).eq('id',editId);
-    if(res.error){
-      alert('Could not save: '+res.error.message+'\n\nIf this mentions the "images" column, run the SQL migration in Supabase first (add_images_column.sql), then try again.');
-      return;
-    }
-    if(tp){ tp.name=name;tp.url=url;tp.market=market;tp.lang=lang;tp.notes=notes;tp.assignedMBs=assignedMBs;tp.status=status;tp.images=images; }
-    await logHistory('updated','testproduct',editId,`Edited test product "${name}" — status: ${status}`);
+    const numId = typeof editId==='string' ? parseInt(editId) : editId;
+    const tp=APP.testProducts.find(p=>p.id===numId||p.id===editId);
+    if(!tp){ alert('Could not find product to update. Try refreshing.'); return; }
+    const upd={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,images};
+    const {error} = await sb.from('test_products').update(upd).eq('id',numId);
+    if(error){ alert('Save failed: '+error.message); return; }
+    // Update local copy
+    tp.name=name;tp.url=url;tp.market=market;tp.lang=lang;tp.notes=notes;
+    tp.assignedMBs=assignedMBs;tp.status=status;tp.images=images;
+    await logHistory('updated','testproduct',numId,`Edited test product "${name}" — status: ${status}`);
   }
   _tpFormImgs=[];
   closeM2(); render();
@@ -1473,10 +1518,13 @@ function openTestResultModal(tpId){
 }
 
 function calcTestCpl(){
-  const s=parseFloat(document.getElementById('tr_spend')?.value||0);
-  const l=parseFloat(document.getElementById('tr_leads')?.value||0);
+  const s=parseFloat(document.getElementById('tr_spend')?.value)||0;
+  const l=parseFloat(document.getElementById('tr_leads')?.value)||0;
   const out=document.getElementById('tcplOut');
-  if(out) out.textContent=(s>0&&l>0)?'$'+(s/l).toFixed(2):'$—';
+  if(!out)return;
+  if(l>0&&s>=0){ const c=(s/l).toFixed(2); out.textContent='$'+c; out.style.color=parseFloat(c)<=2?'var(--ok)':parseFloat(c)<=4?'var(--warn)':'var(--bad)'; }
+  else if(l===0&&s>0){ out.textContent='No leads'; out.style.color='var(--warn)'; }
+  else { out.textContent='$—'; out.style.color='var(--accent)'; }
 }
 
 async function saveTestResult(tpId){
@@ -2290,12 +2338,13 @@ function openReportModal(){
   openM1();
 }
 function calcCpl(){
-  const s=parseFloat(document.getElementById('r_spend')?.value||0);
-  const l=parseFloat(document.getElementById('r_leads')?.value||0);
+  const s=parseFloat(document.getElementById('r_spend')?.value)||0;
+  const l=parseFloat(document.getElementById('r_leads')?.value)||0;
   const out=document.getElementById('cplOut');
   if(!out)return;
-  out.textContent = (s>0&&l>0)?'$'+(s/l).toFixed(2):l===0&&s>0?'No leads':'$—';
-  out.style.color = l===0&&s>0?'var(--warn)':'var(--accent)';
+  if(l>0&&s>=0){ const c=(s/l).toFixed(2); out.textContent='$'+c; out.style.color=parseFloat(c)<=2?'var(--ok)':parseFloat(c)<=4?'var(--warn)':'var(--bad)'; }
+  else if(l===0&&s>0){ out.textContent='No leads'; out.style.color='var(--warn)'; }
+  else { out.textContent='$—'; out.style.color='var(--accent)'; }
 }
 async function saveReport(){
   const me=u();
@@ -2890,11 +2939,12 @@ async function saveProduct(editId){
     await logHistory('created','product',data?.id||0,`Added product "${name}" (${market}) — ${isCod?'COD · ':''}${angles.length} angles, priority: ${priority}`);
   } else {
     const p2=pr(editId);
-    const upd={name,url,cat,market,lang,status,priority,images:[..._formImgs],store_links:storeLinks,ads_platforms:adsPlatforms,is_cod:isCod};
-    if(angles.length)upd.angles=angles; if(hooks.length)upd.hooks=hooks;
-    await sb.from('products').update(upd).eq('id',editId);
+    // Always save angles/hooks even if empty (prevents revert when user clears them)
+    const upd={name,url,cat,market,lang,status,priority,images:[..._formImgs],angles,hooks,store_links:storeLinks,ads_platforms:adsPlatforms,is_cod:isCod};
+    const {error:updErr} = await sb.from('products').update(upd).eq('id',editId);
+    if(updErr){ alert('Save failed: '+updErr.message); return; }
     p2.name=name;p2.url=url;p2.cat=cat;p2.market=market;p2.lang=lang;p2.status=status;p2.priority=priority;p2.images=[..._formImgs];p2.storeLinks=storeLinks;p2.adsPlatforms=adsPlatforms;p2.isCod=isCod;
-    if(angles.length)p2.angles=angles; if(hooks.length)p2.hooks=hooks;
+    p2.angles=angles; p2.hooks=hooks;
     await logHistory('updated','product',editId,`Edited product "${name}" — status: ${status}, priority: ${priority}`);
   }
   _formImgs=[]; _formStoreLinks=[]; closeM2(); APP.page='products'; render();
@@ -2926,18 +2976,38 @@ function go(p){ APP.page=p; APP.tab='all'; render(); }
 document.getElementById('mo1').addEventListener('click',function(e){ if(e.target===this)closeM1(); });
 document.getElementById('mo2').addEventListener('click',function(e){ if(e.target===this)closeM2(); });
 
-// ── STARTUP: load everything from Supabase, then show login ──
+// ── STARTUP ──
 (async function init(){
+  // Show auth screen immediately — don't make user stare at loading spinner
+  // Data loads in background, then auto-login if session exists
+  renderAuth();
+  document.getElementById('auth').style.display='';
+
   try {
     await loadAllData();
-    await new Promise(r=>setTimeout(r,80));
-    hideLoader();
-    renderAuth();
   } catch(err){
     console.error('Supabase init error:', err);
-    document.getElementById('loadMsg').textContent='Connection error — reload to try again';
-    document.getElementById('loadMsg').style.color='#F87171';
+    renderAuth('Connection error — check your internet and reload.');
+    return;
   }
+
+  // Try to restore session from localStorage
+  const savedId = loadSession();
+  if(savedId && APP.users[savedId] && APP.users[savedId].active !== false){
+    const f = APP.users[savedId];
+    APP.me = savedId;
+    APP.authed = true;
+    APP.page = f.role==='product_lister' ? 'products' : 'dashboard';
+    APP.dashUser = f.role==='admin' ? (Object.values(APP.users).find(x=>x.role==='video_editor')?.id||null) : null;
+    document.getElementById('auth').style.display='none';
+    document.getElementById('app').style.display='flex';
+    render();
+    startSync(); // begin real-time polling after auto-login
+    return;
+  }
+
+  // No valid session — show login form (already rendered above)
+  hideLoader();
 })();
 </script>
 </body>
