@@ -321,10 +321,8 @@ function reportToRow(r){ return { mb_id:r.mbId, product_id:r.productId, date:r.d
 // INITIAL DATA LOAD FROM SUPABASE
 // ══════════════════════════════════════════════════════════
 async function loadAllData(){
-  setLoad(15,'Connecting…');
+  setLoad(20,'Connecting…');
 
-  // Fire all 6 requests in parallel instead of one-by-one — this is the main speed win,
-  // since each sequential await was adding its own network round-trip on top of the last.
   const [
     { data: usersData, error: ue },
     { data: prodsData },
@@ -338,13 +336,13 @@ async function loadAllData(){
     sb.from('test_products').select('*').order('id'),
     sb.from('tasks').select('*').order('id'),
     sb.from('reports').select('*').order('id'),
-    sb.from('history').select('*').order('created_at',{ascending:false}).limit(500),
+    sb.from('history').select('*').order('created_at',{ascending:false}).limit(200),
   ]);
 
-  setLoad(70,'Preparing data…');
+  setLoad(85,'Processing…');
 
   if(ue){
-    console.error('users load failed — code:', ue.code, '— message:', ue.message, '— details:', ue.details, '— hint:', ue.hint);
+    console.error('users load failed — code:', ue.code, '— message:', ue.message);
     document.getElementById('loadMsg').textContent = 'DB Error: ' + (ue.message||ue.code||JSON.stringify(ue));
     document.getElementById('loadMsg').style.color = '#F87171';
     return;
@@ -1397,16 +1395,21 @@ function tpImgDrop(e){ e.preventDefault(); tpImgSel({target:{files:e.dataTransfe
 function tpImgGrid(){ document.getElementById('tpimgs').innerHTML=_tpFormImgs.map((s,i)=>`<div class="imw"><img src="${s}"><div class="x" onclick="rmTpImg(${i})">✕</div></div>`).join(''); }
 function rmTpImg(i){ _tpFormImgs.splice(i,1); tpImgGrid(); }
 async function delTestProduct(id){
-  const name=APP.testProducts.find(p=>p.id===id)?.name||'product';
-  APP.testProducts=APP.testProducts.filter(p=>p.id!==id);
-  await sb.from('test_products').delete().eq('id',id);
-  await logHistory('deleted','testproduct',id,`Deleted test product "${name}"`);
+  const numId = parseInt(id)||id;
+  const name=APP.testProducts.find(p=>p.id===numId||String(p.id)===String(id))?.name||'product';
+  APP.testProducts=APP.testProducts.filter(p=>p.id!==numId&&String(p.id)!==String(id));
+  await sb.from('test_products').delete().eq('id',numId);
+  await logHistory('deleted','testproduct',numId,`Deleted test product "${name}"`);
   closeM2(); render();
 }
 
 function openTestProductForm(editId=null){
+  // Normalize editId to number if it's a string number, or null
+  if(editId==='null'||editId===undefined) editId=null;
+  if(editId!==null) editId=parseInt(editId)||editId;
   const isEdit=editId!==null;
-  const tp=isEdit?APP.testProducts.find(p=>p.id===editId):null;
+  const tp=isEdit ? APP.testProducts.find(p=>p.id===editId||String(p.id)===String(editId)) : null;
+  if(isEdit && !tp){ alert('Product not found. Try refreshing the page.'); return; }
   const mbs=Object.values(APP.users).filter(x=>x.role==='media_buyer');
   _tpFormImgs = isEdit ? [...(tp.images||[])] : [];
   document.getElementById('md2').innerHTML=`
@@ -1457,6 +1460,11 @@ function toggleTpMB(mbId){
 }
 
 async function saveTestProduct(editId){
+  // Normalize editId
+  if(editId==='null'||editId===undefined||editId==='undefined') editId=null;
+  const numId = editId!==null ? (parseInt(editId)||editId) : null;
+  const isNew = numId===null;
+
   const name=document.getElementById('tp_name')?.value?.trim();
   const url=document.getElementById('tp_url')?.value?.trim();
   const market=document.getElementById('tp_market')?.value;
@@ -1469,9 +1477,8 @@ async function saveTestProduct(editId){
   if(!name){ alert('Product name is required.'); return; }
   if(!url){ alert('Product URL is required.'); return; }
   const me=u();
-  // Auto-include current MB
   if(me.role==='media_buyer'&&!assignedMBs.includes(me.id)) assignedMBs.push(me.id);
-  const isNew = editId===null||editId==='null';
+
   if(isNew){
     const row={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,test_results:[],images};
     const {data,error} = await sb.from('test_products').insert([row]).select().single();
@@ -1479,15 +1486,12 @@ async function saveTestProduct(editId){
     if(data) APP.testProducts.push(rowToTestProduct(data));
     await logHistory('created','testproduct',data?.id||0,`Added test product "${name}" (${market})`);
   } else {
-    const numId = typeof editId==='string' ? parseInt(editId) : editId;
-    const tp=APP.testProducts.find(p=>p.id===numId||p.id===editId);
-    if(!tp){ alert('Could not find product to update. Try refreshing.'); return; }
+    const tp=APP.testProducts.find(p=>p.id===numId||String(p.id)===String(numId));
+    if(!tp){ alert('Product not found — try refreshing the page.'); return; }
     const upd={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,images};
     const {error} = await sb.from('test_products').update(upd).eq('id',numId);
     if(error){ alert('Save failed: '+error.message); return; }
-    // Update local copy
-    tp.name=name;tp.url=url;tp.market=market;tp.lang=lang;tp.notes=notes;
-    tp.assignedMBs=assignedMBs;tp.status=status;tp.images=images;
+    Object.assign(tp,{name,url,market,lang,notes,assignedMBs,status,images});
     await logHistory('updated','testproduct',numId,`Edited test product "${name}" — status: ${status}`);
   }
   _tpFormImgs=[];
@@ -2978,18 +2982,17 @@ document.getElementById('mo2').addEventListener('click',function(e){ if(e.target
 
 // ── STARTUP ──
 (async function init(){
-  // Show auth screen immediately — don't make user stare at loading spinner
-  // Data loads in background, then auto-login if session exists
-  renderAuth();
-  document.getElementById('auth').style.display='';
-
   try {
     await loadAllData();
   } catch(err){
     console.error('Supabase init error:', err);
-    renderAuth('Connection error — check your internet and reload.');
+    document.getElementById('loadMsg').textContent='Connection error — check your internet and reload.';
+    document.getElementById('loadMsg').style.color='#F87171';
     return;
   }
+
+  // Always hide the loader first
+  hideLoader();
 
   // Try to restore session from localStorage
   const savedId = loadSession();
@@ -3002,12 +3005,13 @@ document.getElementById('mo2').addEventListener('click',function(e){ if(e.target
     document.getElementById('auth').style.display='none';
     document.getElementById('app').style.display='flex';
     render();
-    startSync(); // begin real-time polling after auto-login
+    startSync();
     return;
   }
 
-  // No valid session — show login form (already rendered above)
-  hideLoader();
+  // No valid session — show login form
+  document.getElementById('auth').style.display='';
+  renderAuth();
 })();
 </script>
 </body>
