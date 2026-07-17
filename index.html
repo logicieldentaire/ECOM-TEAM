@@ -1377,19 +1377,98 @@ function openTestProductDetail(id){
           Test results${avgCpl?` · Avg CPL <b style="color:${avgCpl<=2?'var(--ok)':avgCpl<=4?'var(--warn)':'var(--bad)'}">$${avgCpl}</b>`:''}
         </div>
         ${results.length?`<div style="margin-bottom:8px;font-size:12px;color:var(--muted)">Total: <b style="color:var(--ink)">$${totalSpend}</b> spend · <b style="color:var(--ink)">${totalLeads}</b> leads</div>`:''}
-        ${results.length?results.map(r=>`<div style="display:flex;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px">
-          <span style="color:var(--muted)">${fmtDate(r.date)}</span>
-          <span>$${r.spend}</span>
-          <span>${r.leads} leads</span>
-          <b style="color:${(r.cpl||0)<=2?'var(--ok)':(r.cpl||0)<=4?'var(--warn)':'var(--bad)'}">$${r.cpl||0}</b>
-          ${r.platform?`<span style="color:var(--muted)">${r.platform==='TikTok Ads'?'🎵':'📘'}</span>`:''}
-        </div>`).join(''):`<div style="font-size:12px;color:var(--muted)">No results logged yet</div>`}
+        ${results.length?results.map((r,idx)=>`
+          <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px">
+            <span style="color:var(--muted);min-width:60px">${fmtDate(r.date)}</span>
+            <span style="min-width:50px">$${r.spend}</span>
+            <span style="min-width:55px">${r.leads} leads</span>
+            <b style="min-width:40px;color:${(r.cpl||0)<=2?'var(--ok)':(r.cpl||0)<=4?'var(--warn)':'var(--bad)'}">$${r.cpl||0}</b>
+            ${r.platform?`<span style="color:var(--muted)">${r.platform==='TikTok Ads'?'🎵':'📘'}</span>`:''}
+            <div style="margin-left:auto;display:flex;gap:4px">
+              <button class="btn btn-ghost btn-xs" onclick="openEditTestResult(${id},${idx})">✏️ Edit</button>
+              <button class="btn btn-ghost btn-xs" style="color:var(--bad)" onclick="deleteTestResult(${id},${idx})">✕</button>
+            </div>
+          </div>`).join(''):`<div style="font-size:12px;color:var(--muted)">No results logged yet</div>`}
       </div>
     </div>
   </div>`;
   openM2();
 }
-let _tpFormImgs=[];
+function openEditTestResult(tpId, idx){
+  const tp=APP.testProducts.find(p=>p.id===tpId||String(p.id)===String(tpId));
+  if(!tp||!tp.testResults[idx]) return;
+  const r=tp.testResults[idx];
+  document.getElementById('md1').innerHTML=`
+  <div class="mh"><div><div class="mt">Edit Test Result</div><div class="ms">${tp.name} · entry ${idx+1} of ${tp.testResults.length}</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
+  <div class="mb">
+    <div class="fg"><label class="fl">Date <span class="rq">*</span></label><input class="fi" id="er_date" type="date" value="${r.date||''}"></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div class="fg" style="flex:1;min-width:120px"><label class="fl">Spend ($)</label><input class="fi" id="er_spend" type="number" min="0" step="0.01" value="${r.spend||0}" oninput="calcEditCpl()"></div>
+      <div class="fg" style="flex:1;min-width:120px"><label class="fl">Leads <span style="font-weight:400;color:var(--muted);font-size:10px">(0 if none)</span></label><input class="fi" id="er_leads" type="number" min="0" value="${r.leads||0}" oninput="calcEditCpl()"></div>
+    </div>
+    <div style="background:var(--s50);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center;margin-bottom:8px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Cost per lead</div>
+      <div id="erCplOut" style="font-size:26px;font-weight:800;color:var(--accent)">$${r.cpl||0}</div>
+    </div>
+    <div class="fg"><label class="fl">Platform</label>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        <label style="display:flex;align-items:center;gap:7px;padding:8px 14px;border:1.5px solid ${(r.platform||'Facebook Ads')==='Facebook Ads'?'var(--accent)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">
+          <input type="radio" name="er_platform" value="Facebook Ads" ${(r.platform||'Facebook Ads')==='Facebook Ads'?'checked':''} style="cursor:pointer"> 📘 Facebook Ads
+        </label>
+        <label style="display:flex;align-items:center;gap:7px;padding:8px 14px;border:1.5px solid ${r.platform==='TikTok Ads'?'var(--accent)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">
+          <input type="radio" name="er_platform" value="TikTok Ads" ${r.platform==='TikTok Ads'?'checked':''} style="cursor:pointer"> 🎵 TikTok Ads
+        </label>
+      </div>
+    </div>
+    <div class="fg"><label class="fl">Notes</label><textarea class="fi" id="er_notes" rows="2" placeholder="Optional notes…">${r.notes||''}</textarea></div>
+  </div>
+  <div class="mf">
+    <button class="btn btn-out" onclick="closeM1()">Cancel</button>
+    <button class="btn btn-pri" onclick="saveEditTestResult(${tpId},${idx})">Save changes</button>
+  </div>`;
+  openM1();
+}
+
+function calcEditCpl(){
+  const s=parseFloat(document.getElementById('er_spend')?.value)||0;
+  const l=parseFloat(document.getElementById('er_leads')?.value)||0;
+  const out=document.getElementById('erCplOut');
+  if(!out) return;
+  if(l>0){ const c=(s/l).toFixed(2); out.textContent='$'+c; out.style.color=parseFloat(c)<=2?'var(--ok)':parseFloat(c)<=4?'var(--warn)':'var(--bad)'; }
+  else if(s>0){ out.textContent='No leads'; out.style.color='var(--warn)'; }
+  else { out.textContent='$—'; out.style.color='var(--accent)'; }
+}
+
+async function saveEditTestResult(tpId, idx){
+  const tp=APP.testProducts.find(p=>p.id===tpId||String(p.id)===String(tpId));
+  if(!tp||!tp.testResults[idx]){ alert('Result not found.'); return; }
+  const date=document.getElementById('er_date')?.value;
+  const spend=parseFloat(document.getElementById('er_spend')?.value)||0;
+  const leads=parseInt(document.getElementById('er_leads')?.value)||0;
+  const notes=document.getElementById('er_notes')?.value?.trim()||'';
+  const platform=document.querySelector('input[name="er_platform"]:checked')?.value||'Facebook Ads';
+  if(!date){ alert('Please enter a date.'); return; }
+  const cpl=leads>0?+(spend/leads).toFixed(2):0;
+  // Update in-memory
+  tp.testResults[idx]={...tp.testResults[idx], date, spend, leads, cpl, notes, platform};
+  // Persist to Supabase
+  const {error}=await sb.from('test_products').update({test_results:tp.testResults}).eq('id',tpId);
+  if(error){ alert('Save failed: '+error.message); return; }
+  closeM1();
+  // Refresh the detail modal to show updated results
+  openTestProductDetail(tpId);
+}
+
+async function deleteTestResult(tpId, idx){
+  if(!confirm('Delete this result entry? This cannot be undone.')) return;
+  const tp=APP.testProducts.find(p=>p.id===tpId||String(p.id)===String(tpId));
+  if(!tp) return;
+  tp.testResults.splice(idx,1);
+  const {error}=await sb.from('test_products').update({test_results:tp.testResults}).eq('id',tpId);
+  if(error){ alert('Delete failed: '+error.message); tp.testResults.splice(idx,0,{}); return; }
+  // Refresh the detail modal
+  openTestProductDetail(tpId);
+}
 function tpImgSel(e){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>{_tpFormImgs.push(ev.target.result);tpImgGrid();};r.readAsDataURL(f);}); }
 function tpImgDrop(e){ e.preventDefault(); tpImgSel({target:{files:e.dataTransfer.files}}); }
 function tpImgGrid(){ document.getElementById('tpimgs').innerHTML=_tpFormImgs.map((s,i)=>`<div class="imw"><img src="${s}"><div class="x" onclick="rmTpImg(${i})">✕</div></div>`).join(''); }
