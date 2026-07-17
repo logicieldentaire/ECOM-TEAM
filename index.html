@@ -334,7 +334,7 @@ async function loadAllData(){
     sb.from('users').select('*').order('id'),
     sb.from('products').select('*').order('id'),
     sb.from('test_products').select('*').order('id'),
-    sb.from('tasks').select('*').order('id'),
+    sb.from('tasks').select('*').gte('task_date', taskCutoffYMD()).order('id'),
     sb.from('reports').select('*').order('id'),
     sb.from('history').select('*').order('created_at',{ascending:false}).limit(200),
   ]);
@@ -658,27 +658,42 @@ async function login(){
 }
 // ─── Real-time sync (poll every 30s) ───
 let _syncInterval = null;
+// Column lists WITHOUT the heavy `images` JSONB — sync merges images from memory instead.
+const PROD_SYNC_COLS='id,name,market,lang,cat,url,angles,hooks,raw_video,status,priority,store_links,ad_images_link,ads_platforms,is_cod,created_at';
+const TP_SYNC_COLS='id,name,url,market,lang,notes,assigned_mbs,status,test_results,created_at';
 async function syncData(){
   if(!APP.authed) return;
   try {
     const [
       {data:tasksData}, {data:repsData}, {data:tpData}, {data:prodsData}
     ] = await Promise.all([
-      sb.from('tasks').select('*').order('id'),
+      sb.from('tasks').select('*').gte('task_date', taskCutoffYMD()).order('id'),
       sb.from('reports').select('*').order('id'),
-      sb.from('test_products').select('*').order('id'),
-      sb.from('products').select('*').order('id'),
+      sb.from('test_products').select(TP_SYNC_COLS).order('id'),
+      sb.from('products').select(PROD_SYNC_COLS).order('id'),
     ]);
     let changed = false;
     if(tasksData){ APP.tasks=tasksData.map(rowToTask); APP.taskSeq=(Math.max(0,...APP.tasks.map(t=>t.id))||0)+1; changed=true; }
     if(repsData){ APP.reports=repsData.map(rowToReport); changed=true; }
-    if(tpData){ APP.testProducts=tpData.map(rowToTestProduct); changed=true; }
-    if(prodsData){ APP.products=prodsData.map(rowToProduct); changed=true; }
-    if(changed && APP.authed && !document.getElementById('mo1').style.display?.includes('flex') && !document.getElementById('mo2').style.display?.includes('flex')){
-      render(); // only re-render if no modal is open
+    if(tpData){
+      const oldTpImgs=Object.fromEntries(APP.testProducts.map(p=>[p.id,p.images||[]]));
+      APP.testProducts=tpData.map(r=>{const p=rowToTestProduct(r); p.images=oldTpImgs[p.id]||[]; return p;});
+      changed=true;
+    }
+    if(prodsData){
+      const oldImgs=Object.fromEntries(APP.products.map(p=>[p.id,p.images||[]]));
+      APP.products=prodsData.map(r=>{const p=rowToProduct(r); p.images=oldImgs[p.id]||[]; return p;});
+      changed=true;
+    }
+    // Only re-render if no modal is currently open (modals use .open class)
+    const modalOpen = document.getElementById('mo1').classList.contains('open') || document.getElementById('mo2').classList.contains('open');
+    if(changed && APP.authed && !modalOpen){
+      render();
     }
   } catch(e){ console.warn('Sync error:', e); }
 }
+// Tasks older than 120 days are not loaded (keeps payload small as history grows)
+function taskCutoffYMD(){ const d=new Date(); d.setDate(d.getDate()-120); return toYMD(d); }
 function startSync(){
   if(_syncInterval) clearInterval(_syncInterval);
   _syncInterval = setInterval(syncData, 30000); // every 30 seconds
@@ -1469,7 +1484,23 @@ async function deleteTestResult(tpId, idx){
   // Refresh the detail modal
   openTestProductDetail(tpId);
 }
-function tpImgSel(e){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>{_tpFormImgs.push(ev.target.result);tpImgGrid();};r.readAsDataURL(f);}); }
+// ─── Supabase Storage upload (images stored as URLs, not base64) ───
+async function uploadToStorage(file){
+  const ext=(file.name&&file.name.includes('.')?file.name.split('.').pop():'jpg').toLowerCase();
+  const path=Date.now()+'-'+Math.random().toString(36).slice(2,8)+'.'+ext;
+  const {error}=await sb.storage.from('product-images').upload(path,file,{cacheControl:'31536000',upsert:false});
+  if(error){
+    alert('Image upload failed: '+error.message+'\n\nMake sure the "product-images" bucket exists in Supabase Storage (run setup_storage.sql).');
+    return null;
+  }
+  return sb.storage.from('product-images').getPublicUrl(path).data.publicUrl;
+}
+function tpImgSel(e){
+  Array.from(e.target.files).forEach(async f=>{
+    const url=await uploadToStorage(f);
+    if(url){ _tpFormImgs.push(url); tpImgGrid(); }
+  });
+}
 function tpImgDrop(e){ e.preventDefault(); tpImgSel({target:{files:e.dataTransfer.files}}); }
 function tpImgGrid(){ document.getElementById('tpimgs').innerHTML=_tpFormImgs.map((s,i)=>`<div class="imw"><img src="${s}"><div class="x" onclick="rmTpImg(${i})">✕</div></div>`).join(''); }
 function rmTpImg(i){ _tpFormImgs.splice(i,1); tpImgGrid(); }
@@ -2894,7 +2925,17 @@ async function saveInlineHooks(pid){
   document.getElementById('pt_h').textContent='🪝 '+hooks.length+' Hooks';
   render();
 }
-function pImgSel(e,pid){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=async ev=>{const p=pr(pid);if(!p.images)p.images=[];p.images.push(ev.target.result);await sb.from('products').update({images:p.images}).eq('id',pid);prodTab('i',pid);document.getElementById('pt_i').textContent='🖼 Images ('+p.images.length+')';};r.readAsDataURL(f);}); }
+function pImgSel(e,pid){
+  Array.from(e.target.files).forEach(async f=>{
+    const url=await uploadToStorage(f);
+    if(!url) return;
+    const p=pr(pid); if(!p.images)p.images=[];
+    p.images.push(url);
+    await sb.from('products').update({images:p.images}).eq('id',pid);
+    prodTab('i',pid);
+    const tab=document.getElementById('pt_i'); if(tab) tab.textContent='🖼 Images ('+p.images.length+')';
+  });
+}
 function pImgDrop(e,pid){ e.preventDefault(); pImgSel({target:{files:e.dataTransfer.files}},pid); }
 async function delPImg(pid,i){ const p=pr(pid); p.images.splice(i,1); await sb.from('products').update({images:p.images}).eq('id',pid); prodTab('i',pid); document.getElementById('pt_i').textContent='🖼 Images ('+p.images.length+')'; }
 async function saveAdImagesLink(pid){
@@ -2997,7 +3038,12 @@ function updStoreLink(i,field,val){ if(_formStoreLinks[i]) _formStoreLinks[i][fi
 function prevStatic(arr,pfx){ return arr.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${arr.length} detected:</div>`+arr.map((a,i)=>`<div class="pp-item"><span class="pp-n">${pfx==='H'?'H'+String(i+1).padStart(2,'0'):'#'+(i+1)}</span>${escHtml(a)}</div>`).join(''):''; }
 function prevA(){ const l=parseLines(document.getElementById('p_angles').value); document.getElementById('prevA').innerHTML=l.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${l.length} angle(s) detected:</div>`+l.map((a,i)=>`<div class="pp-item"><span class="pp-n">#${i+1}</span>${escHtml(a)}</div>`).join(''):''; }
 function prevH(){ const l=parseLines(document.getElementById('p_hooks').value); document.getElementById('prevH').innerHTML=l.length?`<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">${l.length} hook(s) detected:</div>`+l.map((h,i)=>`<div class="pp-item"><span class="pp-n">H${String(i+1).padStart(2,'0')}</span>${escHtml(h)}</div>`).join(''):''; }
-function fImgSel(e){ Array.from(e.target.files).forEach(f=>{const r=new FileReader();r.onload=ev=>{_formImgs.push(ev.target.result);fGrid();};r.readAsDataURL(f);}); }
+function fImgSel(e){
+  Array.from(e.target.files).forEach(async f=>{
+    const url=await uploadToStorage(f);
+    if(url){ _formImgs.push(url); fGrid(); }
+  });
+}
 function fImgDrop(e){ e.preventDefault(); fImgSel({target:{files:e.dataTransfer.files}}); }
 function fGrid(){ document.getElementById('fimgs').innerHTML=_formImgs.map((s,i)=>`<div class="imw"><img src="${s}"><div class="x" onclick="rmFImg(${i})">✕</div></div>`).join(''); }
 function rmFImg(i){ _formImgs.splice(i,1); fGrid(); }
