@@ -1103,19 +1103,22 @@ function pgReports(){
   const isMB=me.role==='media_buyer';
   const mbs = isMB ? [me] : Object.values(APP.users).filter(x=>x.role==='media_buyer');
   const monthKey = todayYMD().slice(0,7);
-  // Filter state stored in APP.reportFilter (null = all)
-  if(!APP.reportFilter) APP.reportFilter = '';
+  if(!APP.reportFilter || typeof APP.reportFilter==='string') APP.reportFilter = {from:'',to:''};
+  const rf=APP.reportFilter;
 
   const filterBar = `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
-      <div style="flex:1;min-width:180px">
-        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.3px">Filter by date</div>
+      <div style="flex:1;min-width:220px">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.3px">Filter by date range</div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <input type="date" class="fi" style="width:auto;padding:6px 10px;font-size:12px" id="rf_date" value="${APP.reportFilter}"
-            onchange="APP.reportFilter=this.value;render()">
-          ${APP.reportFilter?`<button class="btn btn-ghost btn-sm" onclick="APP.reportFilter='';render()">Clear ✕</button>`:''}
-          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter='${todayYMD()}';render()">Today</button>
-          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter='${yesterdayYMD()}';render()">Yesterday</button>
+          <input type="date" class="fi" style="width:auto;padding:6px 10px;font-size:12px" value="${rf.from}" onchange="APP.reportFilter.from=this.value;render()" title="From">
+          <span style="color:var(--muted);font-size:12px">→</span>
+          <input type="date" class="fi" style="width:auto;padding:6px 10px;font-size:12px" value="${rf.to}" onchange="APP.reportFilter.to=this.value;render()" title="To">
+          ${(rf.from||rf.to)?`<button class="btn btn-ghost btn-sm" onclick="APP.reportFilter={from:'',to:''};render()">Clear ✕</button>`:''}
+          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter={from:'${todayYMD()}',to:'${todayYMD()}'};render()">Today</button>
+          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter={from:'${yesterdayYMD()}',to:'${yesterdayYMD()}'};render()">Yesterday</button>
+          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter={from:'${weekStartOf(todayYMD())}',to:'${todayYMD()}'};render()">This week</button>
+          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter={from:'${monthKey}-01',to:'${todayYMD()}'};render()">This month</button>
         </div>
       </div>
       ${isMB?`<button class="btn btn-pri btn-sm" onclick="openReportModal()">+ Add Daily Report</button>`:''}
@@ -1123,14 +1126,15 @@ function pgReports(){
 
   return filterBar + mbs.map(mb=>{
     let reps = APP.reports.filter(r=>r.mbId===mb.id).sort((a,b)=>b.date.localeCompare(a.date));
-    if(APP.reportFilter) reps = reps.filter(r=>r.date===APP.reportFilter);
+    if(rf.from) reps = reps.filter(r=>r.date>=rf.from);
+    if(rf.to)   reps = reps.filter(r=>r.date<=rf.to);
 
     const monthReps = APP.reports.filter(r=>r.mbId===mb.id&&r.date.startsWith(monthKey));
     const mSpend = monthReps.reduce((s,r)=>s+r.spend,0);
     const mLeads = monthReps.reduce((s,r)=>s+r.leads,0);
     const mCpl = mLeads ? +(mSpend/mLeads).toFixed(2) : 0;
 
-    const filterLabel = APP.reportFilter ? ` — ${fmtDate(APP.reportFilter)}` : ' — All time';
+    const filterLabel = (rf.from||rf.to) ? ` — ${rf.from?fmtDate(rf.from):'…'} to ${rf.to?fmtDate(rf.to):'…'}` : ' — All time';
 
     return `<div class="card" style="margin-bottom:18px">
       <div class="card-h">
@@ -1186,7 +1190,11 @@ function pgProducts(){
   if(!APP.prodFilter) APP.prodFilter = { status:'', priority:'', market:'', cod:'' };
   if(APP.prodFilter.market===undefined) APP.prodFilter.market='';
   if(APP.prodFilter.cod===undefined) APP.prodFilter.cod='';
-  if(APP.prodFilter.status) prods = prods.filter(p=>(p.status||'High stock')===APP.prodFilter.status);
+  if(APP.prodFilter.status==='__in_stock__') {
+    prods = prods.filter(p=>['High stock','Medium stock','Low stock'].includes(p.status||'High stock'));
+  } else if(APP.prodFilter.status) {
+    prods = prods.filter(p=>(p.status||'High stock')===APP.prodFilter.status);
+  }
   if(APP.prodFilter.priority) prods = prods.filter(p=>(p.priority||'Medium')===APP.prodFilter.priority);
   if(APP.prodFilter.market) prods = prods.filter(p=>p.market===APP.prodFilter.market);
   if(APP.prodFilter.cod==='cod') prods = prods.filter(p=>p.isCod);
@@ -1208,6 +1216,7 @@ function pgProducts(){
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
     <select class="fi" style="width:auto;padding:6px 10px;font-size:12px" onchange="APP.prodFilter.status=this.value;render()">
       <option value="">All statuses</option>
+      <option value="__in_stock__" ${APP.prodFilter.status==='__in_stock__'?'selected':''}>📦 Products In Stock</option>
       ${STOCK_STATUSES.map(s=>`<option value="${s}" ${APP.prodFilter.status===s?'selected':''}>${s}</option>`).join('')}
     </select>
     <select class="fi" style="width:auto;padding:6px 10px;font-size:12px" onchange="APP.prodFilter.priority=this.value;render()">
@@ -1612,6 +1621,7 @@ function openTestResultModal(tpId){
   const tp=APP.testProducts.find(p=>p.id===tpId);
   if(!tp)return;
   const today=todayYMD();
+  const curStatus=tp.status||'testing';
   document.getElementById('md1').innerHTML=`
   <div class="mh"><div><div class="mt">Log Test Result</div><div class="ms">${tp.name} · ${tp.market}</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
   <div class="mb">
@@ -1619,16 +1629,32 @@ function openTestResultModal(tpId){
     <div class="fg"><label class="fl">Date <span class="rq">*</span></label><input class="fi" id="tr_date" type="date" value="${today}"></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div class="fg" style="flex:1;min-width:120px"><label class="fl">Spend ($) <span class="rq">*</span></label><input class="fi" id="tr_spend" type="number" min="0" step="0.01" placeholder="0.00" oninput="calcTestCpl()"></div>
-      <div class="fg" style="flex:1;min-width:120px"><label class="fl">Leads <span class="rq">*</span></label><input class="fi" id="tr_leads" type="number" min="1" placeholder="0" oninput="calcTestCpl()"></div>
+      <div class="fg" style="flex:1;min-width:120px"><label class="fl">Leads <span style="font-weight:400;color:var(--muted);font-size:10px">(0 if none)</span></label><input class="fi" id="tr_leads" type="number" min="0" placeholder="0" oninput="calcTestCpl()"></div>
     </div>
-    <div style="background:var(--s50);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center">
+    <div style="background:var(--s50);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;margin-bottom:14px">
       <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">Cost per lead</div>
       <div id="tcplOut" style="font-size:28px;font-weight:800;color:var(--accent)">$—</div>
+    </div>
+    <div class="fg">
+      <label class="fl">Product status <span style="font-weight:400;color:var(--muted)">(update based on this result)</span></label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+        <button class="upill ${curStatus==='testing'?'on':''}" id="trs_testing" type="button" onclick="setTrStatus('testing')">🧪 Still testing</button>
+        <button class="upill ${curStatus==='winner'?'on':''}" id="trs_winner" type="button" onclick="setTrStatus('winner')">✓ Winner</button>
+        <button class="upill ${curStatus==='rejected'?'on':''}" id="trs_rejected" type="button" onclick="setTrStatus('rejected')">✗ Loser / Rejected</button>
+      </div>
+      <input type="hidden" id="tr_status" value="${curStatus}">
     </div>
     <div class="fg" style="margin-top:14px"><label class="fl">Notes</label><textarea class="fi" id="tr_notes" placeholder="How did the creative perform? Any observations..."></textarea></div>
   </div>
   <div class="mf"><button class="btn btn-out" onclick="closeM1()">Cancel</button><button class="btn btn-pri" onclick="saveTestResult(${tpId})">Save Result</button></div>`;
   openM1();
+}
+function setTrStatus(status){
+  ['testing','winner','rejected'].forEach(s=>{
+    const el=document.getElementById('trs_'+s);
+    if(el) el.classList.toggle('on', s===status);
+  });
+  document.getElementById('tr_status').value=status;
 }
 
 function calcTestCpl(){
@@ -1648,11 +1674,14 @@ async function saveTestResult(tpId){
   const spend=parseFloat(document.getElementById('tr_spend')?.value)||0;
   const leads=parseInt(document.getElementById('tr_leads')?.value)||0;
   const notes=document.getElementById('tr_notes')?.value?.trim();
+  const status=document.getElementById('tr_status')?.value||tp.status||'testing';
   if(!date||!(spend>=0)){alert('Please enter a date and spend amount.');return;}
   const cpl = leads>0 ? +(spend/leads).toFixed(2) : 0;
   if(!tp.testResults)tp.testResults=[];
   tp.testResults.push({date,spend,leads,cpl,notes,mbId:APP.me});
-  await sb.from('test_products').update({test_results:tp.testResults}).eq('id',tpId);
+  tp.status=status;
+  await sb.from('test_products').update({test_results:tp.testResults,status}).eq('id',tpId);
+  await logHistory('updated','testproduct',tpId,`Logged result for "${tp.name}" — $${spend} spend, ${leads} leads — status: ${status}`);
   closeM1(); render();
 }
 
@@ -1660,7 +1689,7 @@ async function saveTestResult(tpId){
 // STATISTICS — global KPIs, filterable
 // ══════════════════════════════════════════════════════════
 function pgStats(){
-  if(!APP.statsFilter) APP.statsFilter={from:'',to:'',kpis:['videos','revisions','winners','cpl']};
+  if(!APP.statsFilter) APP.statsFilter={from:'',to:'',kpis:['videos','revisions','winners','cpl','spend','testspend']};
   const f=APP.statsFilter;
   const from=f.from||null, to=f.to||null;
 
@@ -1675,6 +1704,7 @@ function pgStats(){
     {id:'cpl',label:'Average CPL'},
     {id:'leads',label:'Total leads'},
     {id:'spend',label:'Total spend'},
+    {id:'testspend',label:'Testing products spend'},
   ];
 
   const filterBar = `
@@ -1728,6 +1758,20 @@ function pgStats(){
   const totalSpend=mbRows.reduce((s,r)=>s+r.totalSpend,0);
   const globalCpl=totalLeads?+(totalSpend/totalLeads).toFixed(2):0;
 
+  // Testing products spend/leads (from test_products.testResults, filtered by date range)
+  let testSpend=0, testLeads=0, testResultCount=0;
+  APP.testProducts.forEach(tp=>{
+    (tp.testResults||[]).forEach(r=>{
+      if(from && r.date<from) return;
+      if(to && r.date>to) return;
+      testSpend+=parseFloat(r.spend)||0;
+      testLeads+=parseInt(r.leads)||0;
+      testResultCount++;
+    });
+  });
+  const testCpl = testLeads>0 ? +(testSpend/testLeads).toFixed(2) : 0;
+  const combinedSpend = +(totalSpend+testSpend).toFixed(2);
+
   return filterBar + `
   <div class="kpis">
     ${f.kpis.includes('videos')?`<div class="kpi"><div class="kpi-l">Total videos</div><div class="kpi-v">${totalVideos}</div><div class="kpi-s">Across ${ves.length} editors</div></div>`:''}
@@ -1736,7 +1780,9 @@ function pgStats(){
     ${f.kpis.includes('dlrespect')?`<div class="kpi"><div class="kpi-l">Avg deadline respect</div><div class="kpi-v ${avgDl>=80?'kpi-pos':avgDl>=50?'kpi-warn':'kpi-neg'}">${avgDl}%</div><div class="kpi-s">Team average</div></div>`:''}
     ${f.kpis.includes('cpl')?`<div class="kpi"><div class="kpi-l">Global avg CPL</div><div class="kpi-v">$${globalCpl||'—'}</div><div class="kpi-s">${totalLeads} leads total</div></div>`:''}
     ${f.kpis.includes('leads')?`<div class="kpi"><div class="kpi-l">Total leads</div><div class="kpi-v">${totalLeads}</div><div class="kpi-s">Across ${mbs.length} media buyers</div></div>`:''}
-    ${f.kpis.includes('spend')?`<div class="kpi"><div class="kpi-l">Total spend</div><div class="kpi-v">$${totalSpend}</div><div class="kpi-s">Logged in reports</div></div>`:''}
+    ${f.kpis.includes('spend')?`<div class="kpi"><div class="kpi-l">Total spend (catalog)</div><div class="kpi-v">$${totalSpend}</div><div class="kpi-s">Logged in reports</div></div>`:''}
+    ${f.kpis.includes('testspend')?`<div class="kpi"><div class="kpi-l">Testing products spend</div><div class="kpi-v">$${testSpend.toFixed(2)}</div><div class="kpi-s">${testLeads} leads · ${testResultCount} entries${testCpl?` · CPL $${testCpl}`:''}</div></div>`:''}
+    ${(f.kpis.includes('spend')&&f.kpis.includes('testspend'))?`<div class="kpi"><div class="kpi-l">Combined total spend</div><div class="kpi-v" style="color:var(--accent)">$${combinedSpend}</div><div class="kpi-s">Catalog + testing products</div></div>`:''}
   </div>
 
   <div class="g2">
