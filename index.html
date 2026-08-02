@@ -1918,7 +1918,9 @@ function pgHistory(){
 function pgTeam(){
   const mbs=Object.values(APP.users).filter(x=>x.role==='media_buyer');
   const ves=Object.values(APP.users).filter(x=>x.role==='video_editor');
+  const me=u();
   return `
+  ${me.role==='admin'?migrationPanel():''}
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
     <div class="tabs" style="margin-bottom:0">
       <button class="tab on" id="tt_team" onclick="teamTab('team')">Team overview</button>
@@ -1927,6 +1929,84 @@ function pgTeam(){
     <button class="btn btn-pri btn-sm" onclick="openUserModal()">+ Add User</button>
   </div>
   <div id="teamBody">${teamBody('team')}</div>`;
+}
+
+function migrationPanel(){
+  // Count how many products/test products still have base64 (data:) images — these cost heavy Supabase egress
+  const isBase64 = img => typeof img==='string' && img.startsWith('data:');
+  const prodsToFix = APP.products.filter(p=>(p.images||[]).some(isBase64));
+  const tpToFix = APP.testProducts.filter(p=>(p.images||[]).some(isBase64));
+  const totalToFix = prodsToFix.length + tpToFix.length;
+  if(totalToFix===0){
+    return `<div class="al al-ok" style="margin-bottom:18px"><i>✓</i><div>All images are already stored efficiently in Supabase Storage. No action needed.</div></div>`;
+  }
+  return `
+  <div class="card" style="margin-bottom:18px;border-color:var(--warn-bd)">
+    <div class="card-b" style="padding:16px 18px;background:var(--warn-bg)">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="font-size:24px">⚠️</div>
+        <div style="flex:1;min-width:220px">
+          <div style="font-size:14px;font-weight:700;color:var(--ink)">${totalToFix} product${totalToFix>1?'s have':' has'} images stored inefficiently</div>
+          <div style="font-size:12px;color:var(--sub);margin-top:2px">These images are causing high Supabase egress usage (billing quota). Migrating them to Storage will fix this permanently — takes about ${Math.max(5,totalToFix*3)} seconds.</div>
+        </div>
+        <button class="btn btn-pri btn-sm" id="migrateBtn" onclick="runImageMigration()">Migrate ${totalToFix} product${totalToFix>1?'s':''} now</button>
+      </div>
+      <div id="migrateProgress" style="display:none;margin-top:12px">
+        <div style="height:6px;background:#fff;border-radius:3px;overflow:hidden"><div id="migrateBar" style="height:100%;width:0%;background:var(--accent);transition:width .3s"></div></div>
+        <div id="migrateStatus" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function runImageMigration(){
+  const isBase64 = img => typeof img==='string' && img.startsWith('data:');
+  const prodsToFix = APP.products.filter(p=>(p.images||[]).some(isBase64));
+  const tpToFix = APP.testProducts.filter(p=>(p.images||[]).some(isBase64));
+  const all = [...prodsToFix.map(p=>({type:'product',item:p})), ...tpToFix.map(p=>({type:'testproduct',item:p}))];
+  const total = all.length;
+  if(!total) return;
+
+  const btn=document.getElementById('migrateBtn'); if(btn){btn.disabled=true;btn.textContent='Migrating…';}
+  const progWrap=document.getElementById('migrateProgress'); if(progWrap) progWrap.style.display='block';
+
+  function b64ToFile(dataUrl, name){
+    const [meta,data]=dataUrl.split(',');
+    const mimeMatch=meta.match(/data:(.*?);base64/);
+    const mime=mimeMatch?mimeMatch[1]:'image/jpeg';
+    const binary=atob(data);
+    const bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++) bytes[i]=binary.charCodeAt(i);
+    return new File([bytes],name,{type:mime});
+  }
+
+  let done=0, failed=0;
+  for(const entry of all){
+    const {type,item}=entry;
+    const newImages=[];
+    for(let i=0;i<item.images.length;i++){
+      const img=item.images[i];
+      if(!isBase64(img)){ newImages.push(img); continue; }
+      try{
+        const ext=(img.match(/data:image\/(\w+);/)||[])[1]||'jpg';
+        const file=b64ToFile(img, `migrated-${item.id}-${i}.${ext}`);
+        const url=await uploadToStorage(file);
+        newImages.push(url||img); // fallback to original if upload fails
+        if(!url) failed++;
+      }catch(e){ console.error('Migration error for', type, item.id, e); newImages.push(img); failed++; }
+    }
+    item.images=newImages;
+    const table = type==='product' ? 'products' : 'test_products';
+    await sb.from(table).update({images:newImages}).eq('id',item.id);
+    done++;
+    const pct=Math.round(done/total*100);
+    const bar=document.getElementById('migrateBar'); if(bar) bar.style.width=pct+'%';
+    const stat=document.getElementById('migrateStatus'); if(stat) stat.textContent=`${done} of ${total} products migrated…`;
+  }
+
+  await logHistory('updated','system',0,`Migrated ${done} product(s) images to Supabase Storage${failed?` (${failed} image(s) failed)`:''}`);
+  const stat=document.getElementById('migrateStatus'); if(stat) stat.textContent=`Done! ${done} product(s) migrated${failed?`, ${failed} image(s) could not be migrated`:''}.`;
+  setTimeout(()=>render(), 1200);
 }
 function teamTab(t){ document.getElementById('tt_team').className='tab'+(t==='team'?' on':''); document.getElementById('tt_users').className='tab'+(t==='users'?' on':''); document.getElementById('teamBody').innerHTML=teamBody(t); }
 
