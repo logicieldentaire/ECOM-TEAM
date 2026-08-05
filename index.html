@@ -660,7 +660,7 @@ async function login(){
 let _syncInterval = null;
 // Column lists WITHOUT the heavy `images` JSONB — sync merges images from memory instead.
 const PROD_SYNC_COLS='id,name,market,lang,cat,url,angles,hooks,raw_video,status,priority,store_links,ad_images_link,ads_platforms,is_cod,created_at';
-const TP_SYNC_COLS='id,name,url,market,lang,notes,assigned_mbs,status,test_results,created_at';
+const TP_SYNC_COLS='id,name,url,market,lang,notes,assigned_mbs,status,priority,test_results,created_at';
 async function syncData(){
   if(!APP.authed) return;
   try {
