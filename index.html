@@ -469,19 +469,26 @@ let APP = {
 // ══════════════════════════════════════════════════════════
 // Escape HTML special chars so user-entered text never breaks the DOM structure
 // ─── CSV Export engine ───
+// Excel in French/Moroccan locale uses semicolon as the default list separator, not comma —
+// opening a comma-delimited CSV with the wrong locale scatters every field into one column.
+// Fix: use semicolon as delimiter AND add a "sep=;" hint line, which forces Excel to use
+// the right delimiter regardless of the system's regional settings.
+const CSV_DELIM=';';
 function csvEscape(val){
   if(val===null||val===undefined) return '';
   let s=String(val);
-  if(/[",\n]/.test(s)) s='"'+s.replace(/"/g,'""')+'"';
+  if(new RegExp('["'+CSV_DELIM+'\\n]').test(s)) s='"'+s.replace(/"/g,'""')+'"';
   return s;
 }
 function toCSV(rows, headers){
-  const lines=[headers.map(h=>csvEscape(h.label)).join(',')];
-  rows.forEach(row=>{ lines.push(headers.map(h=>csvEscape(typeof h.get==='function'?h.get(row):row[h.key])).join(',')); });
+  const lines=[headers.map(h=>csvEscape(h.label)).join(CSV_DELIM)];
+  rows.forEach(row=>{ lines.push(headers.map(h=>csvEscape(typeof h.get==='function'?h.get(row):row[h.key])).join(CSV_DELIM)); });
   return lines.join('\r\n');
 }
 function downloadCSV(filename, csvContent){
-  const blob=new Blob(['\ufeff'+csvContent], {type:'text/csv;charset=utf-8;'});
+  // "sep=;" as the literal first line tells Excel which delimiter to use, overriding locale settings
+  const fullContent = 'sep='+CSV_DELIM+'\r\n' + csvContent;
+  const blob=new Blob(['\ufeff'+fullContent], {type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url; a.download=filename.endsWith('.csv')?filename:filename+'.csv';
@@ -496,7 +503,7 @@ function exportUsersCSV(){
     {label:'ID',key:'id'},{label:'Name',key:'name'},{label:'Role',key:'role'},
     {label:'Email',key:'email'},{label:'Active',get:r=>r.active?'Yes':'No'},
     {label:'Products assigned',get:r=>(r.products||[]).length},
-    {label:'Video editors (if MB)',get:r=>(r.ves||[]).map(id=>APP.users[id]?.name).filter(Boolean).join('; ')},
+    {label:'Video editors (if MB)',get:r=>(r.ves||[]).map(id=>APP.users[id]?.name).filter(Boolean).join(' | ')},
   ];
   downloadCSV(`users_${stamp()}.csv`, toCSV(Object.values(APP.users), headers));
 }
@@ -506,7 +513,7 @@ function exportProductsCSV(){
     {label:'Language',key:'lang'},{label:'Category',key:'cat'},{label:'URL',key:'url'},
     {label:'Status',key:'status'},{label:'Priority',key:'priority'},
     {label:'COD',get:r=>r.isCod?'Yes':'No'},
-    {label:'Ads platforms',get:r=>(r.adsPlatforms||[]).join('; ')},
+    {label:'Ads platforms',get:r=>(r.adsPlatforms||[]).join(' | ')},
     {label:'Angles count',get:r=>(r.angles||[]).length},
     {label:'Hooks count',get:r=>(r.hooks||[]).length},
     {label:'Images count',get:r=>(r.images||[]).length},
@@ -521,7 +528,7 @@ function exportTestProductsCSV(){
     {label:'ID',key:'id'},{label:'Name',key:'name'},{label:'URL',key:'url'},
     {label:'Market',key:'market'},{label:'Language',key:'lang'},{label:'Status',key:'status'},
     {label:'Priority',key:'priority'},{label:'Notes',key:'notes'},
-    {label:'Assigned MBs',get:r=>(r.assignedMBs||[]).map(id=>APP.users[id]?.name).filter(Boolean).join('; ')},
+    {label:'Assigned MBs',get:r=>(r.assignedMBs||[]).map(id=>APP.users[id]?.name).filter(Boolean).join(' | ')},
     {label:'Test results count',get:r=>(r.testResults||[]).length},
     {label:'Total spend',get:r=>(r.testResults||[]).reduce((s,x)=>s+(parseFloat(x.spend)||0),0).toFixed(2)},
     {label:'Total leads',get:r=>(r.testResults||[]).reduce((s,x)=>s+(parseInt(x.leads)||0),0)},
