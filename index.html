@@ -577,6 +577,52 @@ function buildTasksSheet(){
   ];
   return {name:'Tasks', rows:APP.tasks, headers};
 }
+function buildDeliveredVideosSheet(){
+  const rows=[];
+  APP.tasks.forEach(t=>{
+    const isTest = !!t.isTest;
+    const prod = isTest ? APP.testProducts.find(p=>p.id===t.testProductId) : pr(t.productId);
+    const productName = prod?.name || t.testProductName || '—';
+    const websiteLink = prod?.url || '';
+    (t.variants||[]).forEach((v,i)=>{
+      if(!v.videoLink) return; // only delivered videos
+      rows.push({
+        productName, websiteLink,
+        type: isTest ? 'Test Product' : 'Catalog Product',
+        market: prod?.market || t.testMarket || '—',
+        hook: v.hook || `Hook ${i+1}`,
+        videoLink: v.videoLink,
+        revisionLink: v.revisionLink || '',
+        editor: APP.users[t.assignedVE]?.name || t.assignedVE,
+        taskDate: t.taskDate,
+        uploadedAt: v.uploadedAt || '',
+        productionResult: v.mbResult || 'pending',
+        adResult: v.adResult || 'pending',
+      });
+    });
+  });
+  const headers=[
+    {label:'Product Name',key:'productName'},
+    {label:'Website Link',key:'websiteLink'},
+    {label:'Type',key:'type'},
+    {label:'Market',key:'market'},
+    {label:'Hook',key:'hook'},
+    {label:'Video Link (delivered)',key:'videoLink'},
+    {label:'Revised Video Link',key:'revisionLink'},
+    {label:'Video Editor',key:'editor'},
+    {label:'Task Date',key:'taskDate'},
+    {label:'Uploaded At',key:'uploadedAt'},
+    {label:'Production Result',key:'productionResult'},
+    {label:'Ad Result',key:'adResult'},
+  ];
+  return {name:'Delivered Videos', rows, headers};
+}
+function exportDeliveredVideosXLSX(){
+  const s=buildDeliveredVideosSheet();
+  if(!s.rows.length){ alert('No delivered videos found yet.'); return; }
+  downloadXLSX(`delivered_videos_${stamp()}`, [s]);
+}
+
 function buildTaskVariantsSheet(){
   const rows=[];
   APP.tasks.forEach(t=>(t.variants||[]).forEach((v,i)=>rows.push({...v, taskId:t.id, product:pr(t.productId)?.name||t.testProductName, taskDate:t.taskDate, ve:APP.users[t.assignedVE]?.name, idx:i+1})));
@@ -614,7 +660,7 @@ async function exportAllCSV(){
   if(btn){btn.disabled=true;btn.textContent='Building workbook…';}
   const sheets=[
     buildUsersSheet(), buildProductsSheet(), buildTestProductsSheet(), buildTestResultsSheet(),
-    buildReportsSheet(), buildTasksSheet(), buildTaskVariantsSheet(), buildHistorySheet(),
+    buildReportsSheet(), buildTasksSheet(), buildTaskVariantsSheet(), buildDeliveredVideosSheet(), buildHistorySheet(),
   ];
   downloadXLSX(`EcomTeamAfrica_backup_${stamp()}`, sheets);
   if(btn){btn.disabled=false;btn.textContent='📦 Export All (backup)';}
@@ -2102,9 +2148,21 @@ function backupPanel(){
         <div style="font-size:24px">📦</div>
         <div style="flex:1;min-width:220px">
           <div style="font-size:14px;font-weight:700;color:var(--ink)">Full data backup</div>
-          <div style="font-size:12px;color:var(--sub);margin-top:2px">Downloads one Excel file with 8 tabs: users, products, test products, test results, daily reports, tasks, task variants, and history.</div>
+          <div style="font-size:12px;color:var(--sub);margin-top:2px">Downloads one Excel file with 9 tabs: users, products, test products, test results, daily reports, tasks, task variants, delivered videos, and history.</div>
         </div>
         <button class="btn btn-pri btn-sm" id="exportAllBtn" onclick="exportAllCSV()">📦 Export All (backup)</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:18px;border-color:var(--ok)">
+    <div class="card-b" style="padding:16px 18px;background:var(--ok-bg)">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="font-size:24px">🎬</div>
+        <div style="flex:1;min-width:220px">
+          <div style="font-size:14px;font-weight:700;color:var(--ink)">Delivered videos — all products</div>
+          <div style="font-size:12px;color:var(--sub);margin-top:2px">Every delivered video link (catalog + test products), with product name, website link, market, editor, and result — one row per video.</div>
+        </div>
+        <button class="btn btn-pri btn-sm" onclick="exportDeliveredVideosXLSX()">🎬 Export Delivered Videos</button>
       </div>
     </div>
   </div>`;
