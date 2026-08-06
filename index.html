@@ -468,6 +468,134 @@ let APP = {
 // HELPERS
 // ══════════════════════════════════════════════════════════
 // Escape HTML special chars so user-entered text never breaks the DOM structure
+// ─── CSV Export engine ───
+function csvEscape(val){
+  if(val===null||val===undefined) return '';
+  let s=String(val);
+  if(/[",\n]/.test(s)) s='"'+s.replace(/"/g,'""')+'"';
+  return s;
+}
+function toCSV(rows, headers){
+  const lines=[headers.map(h=>csvEscape(h.label)).join(',')];
+  rows.forEach(row=>{ lines.push(headers.map(h=>csvEscape(typeof h.get==='function'?h.get(row):row[h.key])).join(',')); });
+  return lines.join('\r\n');
+}
+function downloadCSV(filename, csvContent){
+  const blob=new Blob(['\ufeff'+csvContent], {type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=filename.endsWith('.csv')?filename:filename+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+}
+function stamp(){ return todayYMD(); }
+
+// ─── Per-entity export builders ───
+function exportUsersCSV(){
+  const headers=[
+    {label:'ID',key:'id'},{label:'Name',key:'name'},{label:'Role',key:'role'},
+    {label:'Email',key:'email'},{label:'Active',get:r=>r.active?'Yes':'No'},
+    {label:'Products assigned',get:r=>(r.products||[]).length},
+    {label:'Video editors (if MB)',get:r=>(r.ves||[]).map(id=>APP.users[id]?.name).filter(Boolean).join('; ')},
+  ];
+  downloadCSV(`users_${stamp()}.csv`, toCSV(Object.values(APP.users), headers));
+}
+function exportProductsCSV(){
+  const headers=[
+    {label:'ID',key:'id'},{label:'Name',key:'name'},{label:'Market',key:'market'},
+    {label:'Language',key:'lang'},{label:'Category',key:'cat'},{label:'URL',key:'url'},
+    {label:'Status',key:'status'},{label:'Priority',key:'priority'},
+    {label:'COD',get:r=>r.isCod?'Yes':'No'},
+    {label:'Ads platforms',get:r=>(r.adsPlatforms||[]).join('; ')},
+    {label:'Angles count',get:r=>(r.angles||[]).length},
+    {label:'Hooks count',get:r=>(r.hooks||[]).length},
+    {label:'Images count',get:r=>(r.images||[]).length},
+    {label:'Store links',get:r=>(r.storeLinks||[]).map(sl=>`${sl.store}: ${sl.url}`).join(' | ')},
+    {label:'Ad images link',key:'adImagesLink'},
+    {label:'Raw video link',key:'rawVideo'},
+  ];
+  downloadCSV(`products_${stamp()}.csv`, toCSV(APP.products, headers));
+}
+function exportTestProductsCSV(){
+  const headers=[
+    {label:'ID',key:'id'},{label:'Name',key:'name'},{label:'URL',key:'url'},
+    {label:'Market',key:'market'},{label:'Language',key:'lang'},{label:'Status',key:'status'},
+    {label:'Priority',key:'priority'},{label:'Notes',key:'notes'},
+    {label:'Assigned MBs',get:r=>(r.assignedMBs||[]).map(id=>APP.users[id]?.name).filter(Boolean).join('; ')},
+    {label:'Test results count',get:r=>(r.testResults||[]).length},
+    {label:'Total spend',get:r=>(r.testResults||[]).reduce((s,x)=>s+(parseFloat(x.spend)||0),0).toFixed(2)},
+    {label:'Total leads',get:r=>(r.testResults||[]).reduce((s,x)=>s+(parseInt(x.leads)||0),0)},
+    {label:'Images count',get:r=>(r.images||[]).length},
+  ];
+  downloadCSV(`test_products_${stamp()}.csv`, toCSV(APP.testProducts, headers));
+}
+function exportTestResultsCSV(){
+  const rows=[];
+  APP.testProducts.forEach(tp=>(tp.testResults||[]).forEach(r=>rows.push({...r, tpName:tp.name, tpId:tp.id})));
+  const headers=[
+    {label:'Test Product ID',key:'tpId'},{label:'Test Product Name',key:'tpName'},
+    {label:'Date',key:'date'},{label:'Spend',key:'spend'},{label:'Leads',key:'leads'},
+    {label:'CPL',key:'cpl'},{label:'Platform',key:'platform'},
+    {label:'Media Buyer',get:r=>APP.users[r.mbId]?.name||r.mbId},{label:'Notes',key:'notes'},
+  ];
+  downloadCSV(`test_results_detail_${stamp()}.csv`, toCSV(rows, headers));
+}
+function exportReportsCSV(rows){
+  const src=rows||APP.reports;
+  const headers=[
+    {label:'ID',key:'id'},{label:'Media Buyer',get:r=>APP.users[r.mbId]?.name||r.mbId},
+    {label:'Product',get:r=>pr(r.productId)?.name||r.productId},
+    {label:'Date',key:'date'},{label:'Spend',key:'spend'},{label:'Leads',key:'leads'},
+    {label:'CPL',key:'cpl'},{label:'Platform',key:'platform'},
+  ];
+  downloadCSV(`daily_reports_${stamp()}.csv`, toCSV(src, headers));
+}
+function exportTasksCSV(){
+  const headers=[
+    {label:'ID',key:'id'},{label:'Product',get:t=>pr(t.productId)?.name||t.testProductName||'—'},
+    {label:'Is Test',get:t=>t.isTest?'Yes':'No'},{label:'Date',key:'taskDate'},{label:'Day',key:'day'},
+    {label:'Media Buyer',get:t=>APP.users[t.assignedMB]?.name||t.assignedMB},
+    {label:'Video Editor',get:t=>APP.users[t.assignedVE]?.name||t.assignedVE},
+    {label:'Campaign type',key:'campaignType'},{label:'Video type',key:'videoType'},
+    {label:'Voice over',key:'voiceOver'},{label:'Angle',key:'angle'},{label:'Status',key:'status'},
+    {label:'Important note',key:'mbNote'},{label:'Deadline',key:'deadlineDate'},
+    {label:'Variants count',get:t=>(t.variants||[]).length},
+    {label:'Videos uploaded',get:t=>(t.variants||[]).filter(v=>v.videoLink).length},
+    {label:'Approved variants',get:t=>(t.variants||[]).filter(v=>v.mbResult==='approved').length},
+    {label:'Winner variants',get:t=>(t.variants||[]).filter(v=>v.adResult==='winner').length},
+    {label:'Created',key:'createdAt'},{label:'Updated',key:'updatedAt'},
+  ];
+  downloadCSV(`tasks_${stamp()}.csv`, toCSV(APP.tasks, headers));
+}
+function exportTaskVariantsCSV(){
+  const rows=[];
+  APP.tasks.forEach(t=>(t.variants||[]).forEach((v,i)=>rows.push({...v, taskId:t.id, product:pr(t.productId)?.name||t.testProductName, taskDate:t.taskDate, ve:APP.users[t.assignedVE]?.name, idx:i+1})));
+  const headers=[
+    {label:'Task ID',key:'taskId'},{label:'Product',key:'product'},{label:'Date',key:'taskDate'},
+    {label:'Editor',key:'ve'},{label:'Variant #',key:'idx'},{label:'Hook',key:'hook'},
+    {label:'Video link',key:'videoLink'},{label:'Revision link',key:'revisionLink'},
+    {label:'Production result',key:'mbResult'},{label:'Ad result',key:'adResult'},
+    {label:'Uploaded at',key:'uploadedAt'},{label:'MB feedback',key:'mbFeedback'},{label:'Revision feedback',key:'revisionFeedback'},
+  ];
+  downloadCSV(`task_variants_detail_${stamp()}.csv`, toCSV(rows, headers));
+}
+function exportHistoryCSV(){
+  const headers=[
+    {label:'ID',key:'id'},{label:'Date/Time',key:'at'},{label:'Action',key:'action'},
+    {label:'Entity',key:'entity'},{label:'Entity ID',key:'entityId'},{label:'Description',key:'description'},
+    {label:'By',key:'byName'},
+  ];
+  downloadCSV(`history_${stamp()}.csv`, toCSV(APP.history, headers));
+}
+async function exportAllCSV(){
+  const btn=document.getElementById('exportAllBtn');
+  if(btn){btn.disabled=true;btn.textContent='Exporting…';}
+  const jobs=[exportUsersCSV, exportProductsCSV, exportTestProductsCSV, exportTestResultsCSV,
+              ()=>exportReportsCSV(), exportTasksCSV, exportTaskVariantsCSV, exportHistoryCSV];
+  for(const job of jobs){ job(); await new Promise(r=>setTimeout(r,350)); }
+  if(btn){btn.disabled=false;btn.textContent='📦 Export All (backup)';}
+}
+
 function escHtml(str){
   if(str===null||str===undefined) return '';
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -1030,7 +1158,10 @@ function pgTasks(){
   ${filterBar}
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:12px">
     <div style="font-size:13px;font-weight:600;color:var(--sub)">${rangeLabel}</div>
-    ${isMB?`<button class="btn btn-pri btn-sm" onclick="openTaskCreate()">+ Assign Task</button>`:''}
+    <div style="display:flex;gap:8px">
+      ${(me.role==='admin'||isMB)?`<button class="btn btn-out btn-sm" onclick="exportTasksCSV()">⬇ Export CSV</button>`:''}
+      ${isMB?`<button class="btn btn-pri btn-sm" onclick="openTaskCreate()">+ Assign Task</button>`:''}
+    </div>
   </div>
   <div class="tabs">${tabs.map(t=>`<button class="tab ${APP.tab===t.id?'on':''}" onclick="APP.tab='${t.id}';render()">${t.l}</button>`).join('')}</div>
   <div class="card"><div class="tw"><table>
@@ -1121,7 +1252,10 @@ function pgReports(){
           <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter={from:'${monthKey}-01',to:'${todayYMD()}'};render()">This month</button>
         </div>
       </div>
-      ${isMB?`<button class="btn btn-pri btn-sm" onclick="openReportModal()">+ Add Daily Report</button>`:''}
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <button class="btn btn-out btn-sm" onclick="exportReportsCSV(${isMB?`APP.reports.filter(r=>r.mbId==='${me.id}')`:'null'})">⬇ Export CSV</button>
+        ${isMB?`<button class="btn btn-pri btn-sm" onclick="openReportModal()">+ Add Daily Report</button>`:''}
+      </div>
     </div>`;
 
   return filterBar + mbs.map(mb=>{
@@ -1234,7 +1368,7 @@ function pgProducts(){
     </select>
     ${(APP.prodFilter.status||APP.prodFilter.priority||APP.prodFilter.market||APP.prodFilter.cod)?`<button class="btn btn-ghost btn-sm" onclick="APP.prodFilter={status:'',priority:'',market:'',cod:''};render()">Clear ✕</button>`:''}
     <span style="font-size:12px;color:var(--muted)">${prods.length} product${prods.length!==1?'s':''}</span>
-    ${canManage?`<button class="btn btn-pri btn-sm" style="margin-left:auto" onclick="openProductForm()">+ Add Product</button>`:''}
+    ${canManage?`<button class="btn btn-out btn-sm" onclick="exportProductsCSV()">⬇ Export CSV</button><button class="btn btn-pri btn-sm" style="margin-left:auto" onclick="openProductForm()">+ Add Product</button>`:''}
   </div>`;
 
   return `
@@ -1320,7 +1454,7 @@ function pgTestProducts(){
     <input type="date" class="fi" style="width:auto;padding:5px 9px;font-size:12px" value="${tf.to}" onchange="APP.tpFilter.to=this.value;render()" title="To date">
     ${(tf.from||tf.to||tf.status||tf.market||tf.priority)?`<button class="btn btn-ghost btn-sm" onclick="APP.tpFilter={from:'',to:'',status:'',market:'',priority:''};render()">Clear ✕</button>`:''}
     <span style="font-size:12px;color:var(--muted)">${myTP.length} product${myTP.length!==1?'s':''}</span>
-    ${canManage?`<button class="btn btn-pri btn-sm" style="margin-left:auto" onclick="openTestProductForm()">+ Add Test Product</button>`:''}
+    ${canManage?`<button class="btn btn-out btn-sm" onclick="exportTestProductsCSV()">⬇ Export CSV</button><button class="btn btn-out btn-sm" onclick="exportTestResultsCSV()">⬇ Export Results</button><button class="btn btn-pri btn-sm" style="margin-left:auto" onclick="openTestProductForm()">+ Add Test Product</button>`:''}
   </div>`;
 
   return filterBar + `
@@ -1893,6 +2027,7 @@ function pgHistory(){
           <input type="date" class="fi" style="width:auto;padding:6px 10px;font-size:12px" value="${f.to}" onchange="APP.historyFilter.to=this.value;render()">
         </div>
         ${(f.action||f.entity||f.from||f.to)?`<button class="btn btn-ghost btn-sm" onclick="APP.historyFilter={action:'',entity:'',from:'',to:''};render()">Clear filters</button>`:''}
+        <button class="btn btn-out btn-sm" onclick="exportHistoryCSV()">⬇ Export CSV</button>
         <div style="margin-left:auto;font-size:12px;color:var(--muted)">${rows.length} of ${APP.history.length} entries</div>
       </div>
     </div>
@@ -1921,14 +2056,34 @@ function pgTeam(){
   const me=u();
   return `
   ${me.role==='admin'?migrationPanel():''}
+  ${me.role==='admin'?backupPanel():''}
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
     <div class="tabs" style="margin-bottom:0">
       <button class="tab on" id="tt_team" onclick="teamTab('team')">Team overview</button>
       <button class="tab" id="tt_users" onclick="teamTab('users')">User accounts</button>
     </div>
-    <button class="btn btn-pri btn-sm" onclick="openUserModal()">+ Add User</button>
+    <div style="display:flex;gap:8px">
+      ${me.role==='admin'?`<button class="btn btn-out btn-sm" onclick="exportUsersCSV()">⬇ Export CSV</button>`:''}
+      <button class="btn btn-pri btn-sm" onclick="openUserModal()">+ Add User</button>
+    </div>
   </div>
   <div id="teamBody">${teamBody('team')}</div>`;
+}
+
+function backupPanel(){
+  return `
+  <div class="card" style="margin-bottom:18px;border-color:var(--accent)">
+    <div class="card-b" style="padding:16px 18px;background:var(--accent-bg)">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="font-size:24px">📦</div>
+        <div style="flex:1;min-width:220px">
+          <div style="font-size:14px;font-weight:700;color:var(--ink)">Full data backup</div>
+          <div style="font-size:12px;color:var(--sub);margin-top:2px">Downloads every table as a separate CSV file: users, products, test products, test results, daily reports, tasks, task variants, and history.</div>
+        </div>
+        <button class="btn btn-pri btn-sm" id="exportAllBtn" onclick="exportAllCSV()">📦 Export All (backup)</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function migrationPanel(){
