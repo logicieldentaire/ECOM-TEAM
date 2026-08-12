@@ -871,24 +871,40 @@ async function syncData(){
       sb.from('products').select(PROD_SYNC_COLS).order('id'),
     ]);
     let changed = false;
-    if(tasksData){ APP.tasks=tasksData.map(rowToTask); APP.taskSeq=(Math.max(0,...APP.tasks.map(t=>t.id))||0)+1; changed=true; }
-    if(repsData){ APP.reports=repsData.map(rowToReport); changed=true; }
+
+    if(tasksData){
+      const newTasks=tasksData.map(rowToTask);
+      if(JSON.stringify(newTasks)!==JSON.stringify(APP.tasks)){ APP.tasks=newTasks; APP.taskSeq=(Math.max(0,...APP.tasks.map(t=>t.id))||0)+1; changed=true; }
+    }
+    if(repsData){
+      const newReps=repsData.map(rowToReport);
+      if(JSON.stringify(newReps)!==JSON.stringify(APP.reports)){ APP.reports=newReps; changed=true; }
+    }
     if(tpData){
       const oldTpImgs=Object.fromEntries(APP.testProducts.map(p=>[p.id,p.images||[]]));
-      APP.testProducts=tpData.map(r=>{const p=rowToTestProduct(r); p.images=oldTpImgs[p.id]||[]; return p;});
-      changed=true;
+      const newTp=tpData.map(r=>{const p=rowToTestProduct(r); p.images=oldTpImgs[p.id]||[]; return p;});
+      if(JSON.stringify(newTp)!==JSON.stringify(APP.testProducts)){ APP.testProducts=newTp; changed=true; }
     }
     if(prodsData){
       const oldImgs=Object.fromEntries(APP.products.map(p=>[p.id,p.images||[]]));
-      APP.products=prodsData.map(r=>{const p=rowToProduct(r); p.images=oldImgs[p.id]||[]; return p;});
-      changed=true;
+      const newProds=prodsData.map(r=>{const p=rowToProduct(r); p.images=oldImgs[p.id]||[]; return p;});
+      if(JSON.stringify(newProds)!==JSON.stringify(APP.products)){ APP.products=newProds; changed=true; }
     }
-    // Only re-render if no modal is currently open (modals use .open class)
+
+    // Only re-render if something actually changed AND no modal is open
     const modalOpen = document.getElementById('mo1').classList.contains('open') || document.getElementById('mo2').classList.contains('open');
     if(changed && APP.authed && !modalOpen){
-      render();
+      renderPreservingScroll();
     }
   } catch(e){ console.warn('Sync error:', e); }
+}
+// Re-render without losing the user's current scroll position in the main content area
+function renderPreservingScroll(){
+  const pg=document.getElementById('pg');
+  const scrollY = pg ? pg.scrollTop : 0;
+  render();
+  const newPg=document.getElementById('pg');
+  if(newPg) newPg.scrollTop = scrollY;
 }
 // Tasks older than 120 days are not loaded (keeps payload small as history grows)
 function taskCutoffYMD(){ const d=new Date(); d.setDate(d.getDate()-120); return toYMD(d); }
