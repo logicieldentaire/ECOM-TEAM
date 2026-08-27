@@ -331,6 +331,7 @@ async function loadAllData(){
     { data: tasksData },
     { data: repsData },
     { data: histData },
+    { data: optionsData },
   ] = await Promise.all([
     sb.from('users').select('*').order('id'),
     sb.from('products').select('*').order('id'),
@@ -338,9 +339,17 @@ async function loadAllData(){
     sb.from('tasks').select('*').gte('task_date', taskCutoffYMD()).order('id'),
     sb.from('reports').select('*').order('id'),
     sb.from('history').select('*').order('created_at',{ascending:false}).limit(200),
+    sb.from('custom_options').select('*'),
   ]);
 
   setLoad(85,'Processing…');
+
+  if(optionsData){
+    optionsData.forEach(row=>{
+      if(row.option_type==='market' && !MARKET_LIST.includes(row.value)) MARKET_LIST.push(row.value);
+      if(row.option_type==='language' && !LANGUAGE_LIST.includes(row.value)) LANGUAGE_LIST.push(row.value);
+    });
+  }
 
   if(ue){
     console.error('users load failed — code:', ue.code, '— message:', ue.message);
@@ -386,7 +395,12 @@ function promptNewMarket(selectId){
   const name=prompt('Enter the new market name (e.g. NIGERIA, UGANDA):');
   if(name && name.trim()){
     const clean=name.trim().toUpperCase();
-    if(!MARKET_LIST.includes(clean)) MARKET_LIST.push(clean);
+    if(!MARKET_LIST.includes(clean)){
+      MARKET_LIST.push(clean);
+      sb.from('custom_options').insert([{option_type:'market', value:clean}]).then(({error})=>{
+        if(error) console.warn('Could not persist new market:', error.message);
+      });
+    }
     // Rebuild the select with the new market selected
     sel.innerHTML = MARKET_LIST.map(m=>`<option value="${m}" ${m===clean?'selected':''}>${m}</option>`).join('')
       + `<option value="__add_new__" style="font-style:italic">+ Add new market…</option>`;
@@ -409,12 +423,28 @@ function promptNewLanguage(selectId){
   const name=prompt('Enter the new language name (e.g. Portuguese, Amharic):');
   if(name && name.trim()){
     const clean=name.trim().replace(/\b\w/g,c=>c.toUpperCase());
-    if(!LANGUAGE_LIST.includes(clean)) LANGUAGE_LIST.push(clean);
+    if(!LANGUAGE_LIST.includes(clean)){
+      LANGUAGE_LIST.push(clean);
+      sb.from('custom_options').insert([{option_type:'language', value:clean}]).then(({error})=>{
+        if(error) console.warn('Could not persist new language:', error.message);
+      });
+    }
     sel.innerHTML = LANGUAGE_LIST.map(l=>`<option value="${l}" ${l===clean?'selected':''}>${l}</option>`).join('')
       + `<option value="__add_new__" style="font-style:italic">+ Add new language…</option>`;
   } else {
     sel.value = LANGUAGE_LIST[0];
   }
+}
+// Load any previously-added custom markets/languages from Supabase at startup
+async function loadCustomOptions(){
+  try{
+    const {data,error} = await sb.from('custom_options').select('*');
+    if(error||!data) return;
+    data.forEach(row=>{
+      if(row.option_type==='market' && !MARKET_LIST.includes(row.value)) MARKET_LIST.push(row.value);
+      if(row.option_type==='language' && !LANGUAGE_LIST.includes(row.value)) LANGUAGE_LIST.push(row.value);
+    });
+  }catch(e){ console.warn('Could not load custom options:', e); }
 }
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const DAY_IDX = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5 };
@@ -2921,8 +2951,12 @@ async function saveReport(){
       if(!tp){ alert('Test product not found — try refreshing the page.'); return; }
       if(!tp.testResults)tp.testResults=[];
       const newResults=[...tp.testResults, {date,spend,leads,cpl,notes:'',mbId:me.id,platform}];
-      const {error}=await sb.from('test_products').update({test_results:newResults}).eq('id',pid);
+      const {data,error}=await sb.from('test_products').update({test_results:newResults}).eq('id',pid).select();
       if(error){ alert('Could not save report: '+error.message); return; }
+      if(!data||data.length===0){
+        alert('Warning: no matching test product was found in the database — your report was NOT saved. Please refresh and try again.');
+        return;
+      }
       tp.testResults=newResults;
       await logHistory('created','report',pid,`${me.name} logged test result for "${tp.name}" — $${spend} spend, ${leads} leads (${platform})`);
     } else {
