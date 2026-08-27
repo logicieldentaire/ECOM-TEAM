@@ -395,6 +395,27 @@ function promptNewMarket(selectId){
     sel.value = MARKET_LIST[0];
   }
 }
+
+// ─── Language select with "add new" option (same pattern as markets) ───
+let LANGUAGE_LIST = ['English','French','Swahili','Arabic'];
+function languageSelectHTML(id, selectedValue){
+  return `<select class="fi" id="${id}" onchange="if(this.value==='__add_new__'){promptNewLanguage('${id}')}">
+    ${LANGUAGE_LIST.map(l=>`<option value="${l}" ${selectedValue===l?'selected':''}>${l}</option>`).join('')}
+    <option value="__add_new__" style="font-style:italic">+ Add new language…</option>
+  </select>`;
+}
+function promptNewLanguage(selectId){
+  const sel=document.getElementById(selectId);
+  const name=prompt('Enter the new language name (e.g. Portuguese, Amharic):');
+  if(name && name.trim()){
+    const clean=name.trim().replace(/\b\w/g,c=>c.toUpperCase());
+    if(!LANGUAGE_LIST.includes(clean)) LANGUAGE_LIST.push(clean);
+    sel.innerHTML = LANGUAGE_LIST.map(l=>`<option value="${l}" ${l===clean?'selected':''}>${l}</option>`).join('')
+      + `<option value="__add_new__" style="font-style:italic">+ Add new language…</option>`;
+  } else {
+    sel.value = LANGUAGE_LIST[0];
+  }
+}
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const DAY_IDX = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5 };
 
@@ -1780,7 +1801,7 @@ function openTestProductForm(editId=null){
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div class="fg" style="flex:2;min-width:200px"><label class="fl">Product URL <span class="rq">*</span></label><input class="fi" id="tp_url" value="${isEdit?tp.url:''}" placeholder="https://..."></div>
       <div class="fg" style="flex:1;min-width:110px"><label class="fl">Language</label>
-        <select class="fi" id="tp_lang">${['English','French','Swahili','Arabic'].map(l=>`<option ${isEdit&&tp.lang===l?'selected':''}>${l}</option>`).join('')}</select>
+        ${languageSelectHTML('tp_lang', isEdit?(tp.lang||LANGUAGE_LIST[0]):LANGUAGE_LIST[0])}
       </div>
     </div>
     <div class="fg"><label class="fl">Notes / Instructions for MB & VE</label><textarea class="fi" id="tp_notes" rows="3" placeholder="Describe the product, what angles to try, target audience...">${isEdit?tp.notes||'':''}</textarea></div>
@@ -2831,6 +2852,10 @@ function openReportModal(){
   const scalingProds=APP.products.filter(p=>me.products.includes(p.id));
   const testProds=APP.testProducts.filter(p=>p.assignedMBs?.includes(APP.me));
   const today=todayYMD();
+  if(!scalingProds.length && !testProds.length){
+    alert('No products are assigned to you yet. Ask the admin to assign you a product before logging a report.');
+    return;
+  }
   document.getElementById('md1').innerHTML=`
   <div class="mh"><div><div class="mt">Add Daily Report</div><div class="ms">CPL is calculated automatically</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
   <div class="mb">
@@ -2883,19 +2908,32 @@ async function saveReport(){
   if(!rawPid||!date||!(spend>=0)){ alert('Fill all required fields.'); return; }
   const cpl = leads>0 ? +(spend/leads).toFixed(2) : 0;
 
-  if(isTest){
-    const tp=APP.testProducts.find(p=>p.id===pid);
-    if(!tp)return;
-    if(!tp.testResults)tp.testResults=[];
-    tp.testResults.push({date,spend,leads,cpl,notes:'',mbId:me.id,platform});
-    await sb.from('test_products').update({test_results:tp.testResults}).eq('id',pid);
-    await logHistory('created','report',pid,`${me.name} logged test result for "${tp.name}" — $${spend} spend, ${leads} leads (${platform})`);
-  } else {
-    const { data } = await sb.from('reports').insert([{mb_id:me.id,product_id:pid,date,spend,leads,cpl,platform}]).select().single();
-    if(data) APP.reports.push({id:data.id,mbId:me.id,productId:pid,date,spend,leads,cpl,platform});
-    await logHistory('created','report',data?.id||0,`${me.name} logged report for "${pr(pid)?.name||'product'}" — $${spend} spend, ${leads} leads (${platform})`);
+  const saveBtn=document.querySelector('#md1 .btn-pri');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+
+  try {
+    if(isTest){
+      const tp=APP.testProducts.find(p=>p.id===pid);
+      if(!tp){ alert('Test product not found — try refreshing the page.'); return; }
+      if(!tp.testResults)tp.testResults=[];
+      const newResults=[...tp.testResults, {date,spend,leads,cpl,notes:'',mbId:me.id,platform}];
+      const {error}=await sb.from('test_products').update({test_results:newResults}).eq('id',pid);
+      if(error){ alert('Could not save report: '+error.message); return; }
+      tp.testResults=newResults;
+      await logHistory('created','report',pid,`${me.name} logged test result for "${tp.name}" — $${spend} spend, ${leads} leads (${platform})`);
+    } else {
+      const { data, error } = await sb.from('reports').insert([{mb_id:me.id,product_id:pid,date,spend,leads,cpl,platform}]).select().single();
+      if(error){ alert('Could not save report: '+error.message); return; }
+      if(data) APP.reports.push({id:data.id,mbId:me.id,productId:pid,date,spend,leads,cpl,platform});
+      await logHistory('created','report',data?.id||0,`${me.name} logged report for "${pr(pid)?.name||'product'}" — $${spend} spend, ${leads} leads (${platform})`);
+    }
+    closeM1(); render();
+  } catch(err){
+    console.error('saveReport error:', err);
+    alert('Something went wrong while saving: '+(err.message||err));
+  } finally {
+    if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save Report'; }
   }
-  closeM1(); render();
 }
 async function deleteReport(id){
   if(!confirm('Delete this report?'))return;
@@ -3377,7 +3415,7 @@ function openProductForm(editId=null){
     <div class="fg"><label class="fl">Main product URL <span class="rq">*</span></label><input class="fi" id="p_url" value="${isEdit?p.url:''}" placeholder="harakastore.shop/products/..."></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div class="fg" style="flex:1;min-width:140px"><label class="fl">Market <span class="rq">*</span></label>${marketSelectHTML('p_market', isEdit?p.market:MARKET_LIST[0])}</div>
-      <div class="fg" style="flex:1;min-width:120px"><label class="fl">Ad language</label><select class="fi" id="p_lang">${['English','French','Swahili','Arabic'].map(l=>`<option ${isEdit&&p.lang===l?'selected':''}>${l}</option>`).join('')}</select></div>
+      <div class="fg" style="flex:1;min-width:120px"><label class="fl">Ad language</label>${languageSelectHTML('p_lang', isEdit?(p.lang||LANGUAGE_LIST[0]):LANGUAGE_LIST[0])}</div>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
       <div class="fg" style="flex:1;min-width:200px"><label class="fl">Stock status <span class="rq">*</span></label>
