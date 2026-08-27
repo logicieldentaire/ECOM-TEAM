@@ -1761,25 +1761,30 @@ async function saveEditTestResult(tpId, idx){
   const platform=document.querySelector('input[name="er_platform"]:checked')?.value||'Facebook Ads';
   if(!date){ alert('Please enter a date.'); return; }
   const cpl=leads>0?+(spend/leads).toFixed(2):0;
-  // Update in-memory
-  tp.testResults[idx]={...tp.testResults[idx], date, spend, leads, cpl, notes, platform};
-  // Persist to Supabase
-  const {error}=await sb.from('test_products').update({test_results:tp.testResults}).eq('id',tpId);
+  // Build new array without mutating tp yet
+  const newResults=[...tp.testResults];
+  newResults[idx]={...newResults[idx], date, spend, leads, cpl, notes, platform};
+  const {data,error}=await sb.from('test_products').update({test_results:newResults}).eq('id',tp.id).select();
   if(error){ alert('Save failed: '+error.message); return; }
+  if(!data||data.length===0){ alert('Warning: no matching product was found — your edit was NOT saved. Please refresh and try again.'); return; }
+  tp.testResults=newResults;
   closeM1();
   // Refresh the detail modal to show updated results
-  openTestProductDetail(tpId);
+  openTestProductDetail(tp.id);
 }
 
 async function deleteTestResult(tpId, idx){
   if(!confirm('Delete this result entry? This cannot be undone.')) return;
   const tp=APP.testProducts.find(p=>p.id===tpId||String(p.id)===String(tpId));
   if(!tp) return;
-  tp.testResults.splice(idx,1);
-  const {error}=await sb.from('test_products').update({test_results:tp.testResults}).eq('id',tpId);
-  if(error){ alert('Delete failed: '+error.message); tp.testResults.splice(idx,0,{}); return; }
+  const newResults=[...tp.testResults];
+  newResults.splice(idx,1);
+  const {data,error}=await sb.from('test_products').update({test_results:newResults}).eq('id',tp.id).select();
+  if(error){ alert('Delete failed: '+error.message); return; }
+  if(!data||data.length===0){ alert('Warning: no matching product was found — the deletion was NOT saved. Please refresh and try again.'); return; }
+  tp.testResults=newResults;
   // Refresh the detail modal
-  openTestProductDetail(tpId);
+  openTestProductDetail(tp.id);
 }
 // ─── Supabase Storage upload (images stored as URLs, not base64) ───
 async function uploadToStorage(file){
@@ -1975,8 +1980,8 @@ function calcTestCpl(){
 }
 
 async function saveTestResult(tpId){
-  const tp=APP.testProducts.find(p=>p.id===tpId);
-  if(!tp)return;
+  const tp=APP.testProducts.find(p=>p.id===tpId||String(p.id)===String(tpId));
+  if(!tp){ alert('Product not found — try refreshing the page.'); return; }
   const date=document.getElementById('tr_date')?.value;
   const spend=parseFloat(document.getElementById('tr_spend')?.value)||0;
   const leads=parseInt(document.getElementById('tr_leads')?.value)||0;
@@ -1984,12 +1989,30 @@ async function saveTestResult(tpId){
   const status=document.getElementById('tr_status')?.value||tp.status||'testing';
   if(!date||!(spend>=0)){alert('Please enter a date and spend amount.');return;}
   const cpl = leads>0 ? +(spend/leads).toFixed(2) : 0;
-  if(!tp.testResults)tp.testResults=[];
-  tp.testResults.push({date,spend,leads,cpl,notes,mbId:APP.me});
-  tp.status=status;
-  await sb.from('test_products').update({test_results:tp.testResults,status}).eq('id',tpId);
-  await logHistory('updated','testproduct',tpId,`Logged result for "${tp.name}" — $${spend} spend, ${leads} leads — status: ${status}`);
-  closeM1(); render();
+
+  const saveBtn=document.querySelector('#md1 .btn-pri');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+
+  // Build the new array WITHOUT mutating tp yet — only commit locally after Supabase confirms
+  const newResults=[...(tp.testResults||[]), {date,spend,leads,cpl,notes,mbId:APP.me}];
+
+  try {
+    const {data,error}=await sb.from('test_products').update({test_results:newResults,status}).eq('id',tp.id).select();
+    if(error){ alert('Could not save result: '+error.message); return; }
+    if(!data||data.length===0){
+      alert('Warning: no matching product was found in the database — your result was NOT saved. Please refresh the page and try again.');
+      return;
+    }
+    tp.testResults=newResults;
+    tp.status=status;
+    await logHistory('updated','testproduct',tp.id,`Logged result for "${tp.name}" — $${spend} spend, ${leads} leads — status: ${status}`);
+    closeM1(); render();
+  } catch(err){
+    console.error('saveTestResult error:', err);
+    alert('Something went wrong while saving: '+(err.message||err));
+  } finally {
+    if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent='Save Result'; }
+  }
 }
 
 // ══════════════════════════════════════════════════════════
