@@ -1565,7 +1565,7 @@ function pgTestProducts(){
   </div>`;
 
   return filterBar + `
-  ${myTP.length===0?`<div class="empty"><div class="empty-i">🧪</div><div class="empty-t">No test products${canManage?' added yet':' assigned to you'}</div></div>`:''}
+  ${myTP.length===0?`<div class="empty"><div class="empty-i">🧪</div><div class="empty-t">${(tf.status||tf.market||tf.priority||tf.from||tf.to)?'No test products match your current filters — try clearing them above':'No test products'+(canManage?' added yet':' assigned to you')}</div></div>`:''}
   <div class="pgrid">
   ${myTP.map(tp=>{
     const testTasks=APP.tasks.filter(t=>t.testProductId===tp.id);
@@ -1881,8 +1881,12 @@ async function saveTestProduct(editId){
     const tp=APP.testProducts.find(p=>p.id===numId||String(p.id)===String(numId));
     if(!tp){ alert('Product not found — try refreshing the page.'); return; }
     const upd={name,url,market,lang,notes,assigned_mbs:assignedMBs,status,priority,images};
-    const {error} = await sb.from('test_products').update(upd).eq('id',numId);
+    const {data,error} = await sb.from('test_products').update(upd).eq('id',numId).select();
     if(error){ alert('Save failed: '+error.message); return; }
+    if(!data||data.length===0){
+      alert('Warning: no matching product was found in the database — your changes were NOT saved. Please refresh the page and try again.');
+      return;
+    }
     Object.assign(tp,{name,url,market,lang,notes,assignedMBs,status,priority,images});
     await logHistory('updated','testproduct',numId,`Edited test product "${name}" — status: ${status}`);
   }
@@ -3519,8 +3523,12 @@ async function saveProduct(editId){
     const p2=pr(editId);
     // Always save angles/hooks even if empty (prevents revert when user clears them)
     const upd={name,url,cat,market,lang,status,priority,images:[..._formImgs],angles,hooks,store_links:storeLinks,ads_platforms:adsPlatforms,is_cod:isCod};
-    const {error:updErr} = await sb.from('products').update(upd).eq('id',editId);
+    const {data:updData,error:updErr} = await sb.from('products').update(upd).eq('id',editId).select();
     if(updErr){ alert('Save failed: '+updErr.message); return; }
+    if(!updData||updData.length===0){
+      alert('Warning: no matching product was found in the database — your changes were NOT saved. Please refresh the page and try again.');
+      return;
+    }
     p2.name=name;p2.url=url;p2.cat=cat;p2.market=market;p2.lang=lang;p2.status=status;p2.priority=priority;p2.images=[..._formImgs];p2.storeLinks=storeLinks;p2.adsPlatforms=adsPlatforms;p2.isCod=isCod;
     p2.angles=angles; p2.hooks=hooks;
     await logHistory('updated','product',editId,`Edited product "${name}" — status: ${status}, priority: ${priority}`);
