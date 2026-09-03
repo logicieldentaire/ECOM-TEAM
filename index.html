@@ -3106,33 +3106,50 @@ async function saveUser(uid){
     : [];
   const perms={}; allPerms.forEach(p=>{ const el=document.getElementById('perm_'+p); perms[p]=el&&el.classList.contains('on')?1:0; });
   if(!name||!email){ alert('Name and email required.'); return; }
-  if(uid==='null'||uid===null){
-    const id=document.getElementById('u_id').value.trim();
-    if(!id){ alert('User ID required.'); return; }
-    if(APP.users[id]){ alert('User ID already exists.'); return; }
-    if(!pwd||pwd.length<6){ alert('Password must be at least 6 characters.'); return; }
-    const av2=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-    const newUser={id,name,role,av:av2,email,pwd,products:[],ves:vesSelected,active:true,perms};
-    await sb.from('users').insert([{...newUser}]);
-    APP.users[id]=newUser;
-    AV[id]='#'+Math.floor(Math.random()*8388607+4194304).toString(16);
-    await logHistory('created','user',id,`Created user ${name} (${role.replace('_',' ')})`);
-  } else {
-    const x=APP.users[uid];
-    const changes=[];
-    if(x.name!==name)changes.push(`name → "${name}"`);
-    if(x.email!==email)changes.push(`email → "${email}"`);
-    if(x.role!==role)changes.push(`role → "${role}"`);
-    const upd={name,email,role,perms};
-    if(pwd&&pwd.length>=6){upd.pwd=pwd;changes.push('password changed');}
-    if(role==='media_buyer'){ upd.ves=vesSelected; changes.push(`editors: [${vesSelected.map(id=>APP.users[id]?.name).join(', ')}]`); }
-    await sb.from('users').update(upd).eq('id',uid);
-    x.name=name;x.email=email;x.role=role;x.perms=perms;
-    if(pwd&&pwd.length>=6)x.pwd=pwd;
-    if(role==='media_buyer') x.ves=vesSelected;
-    await logHistory('updated','user',uid,`Edited user ${name}${changes.length?' — '+changes.join(', '):''}`);
+
+  const saveBtn=document.querySelector('#md2 .btn-pri');
+  if(saveBtn){ saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+
+  try {
+    if(uid==='null'||uid===null){
+      const id=document.getElementById('u_id').value.trim();
+      if(!id){ alert('User ID required.'); return; }
+      if(APP.users[id]){ alert('User ID already exists.'); return; }
+      if(!pwd||pwd.length<6){ alert('Password must be at least 6 characters.'); return; }
+      const av2=name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+      const newUser={id,name,role,av:av2,email,pwd,products:[],ves:vesSelected,active:true,perms};
+      const {error} = await sb.from('users').insert([{...newUser}]);
+      if(error){ alert('Could not create user: '+error.message); return; }
+      APP.users[id]=newUser;
+      AV[id]='#'+Math.floor(Math.random()*8388607+4194304).toString(16);
+      await logHistory('created','user',id,`Created user ${name} (${role.replace('_',' ')})`);
+    } else {
+      const x=APP.users[uid];
+      const changes=[];
+      if(x.name!==name)changes.push(`name → "${name}"`);
+      if(x.email!==email)changes.push(`email → "${email}"`);
+      if(x.role!==role)changes.push(`role → "${role}"`);
+      const upd={name,email,role,perms};
+      if(pwd&&pwd.length>=6){upd.pwd=pwd;changes.push('password changed');}
+      if(role==='media_buyer'){ upd.ves=vesSelected; changes.push(`editors: [${vesSelected.map(id=>APP.users[id]?.name).join(', ')}]`); }
+      const {data,error} = await sb.from('users').update(upd).eq('id',uid).select();
+      if(error){ alert('Save failed: '+error.message); return; }
+      if(!data||data.length===0){
+        alert('Warning: no matching user was found in the database — your changes were NOT saved. Please refresh the page and try again.');
+        return;
+      }
+      x.name=name;x.email=email;x.role=role;x.perms=perms;
+      if(pwd&&pwd.length>=6)x.pwd=pwd;
+      if(role==='media_buyer') x.ves=vesSelected;
+      await logHistory('updated','user',uid,`Edited user ${name}${changes.length?' — '+changes.join(', '):''}`);
+    }
+    closeM2(); render();
+  } catch(err){
+    console.error('saveUser error:', err);
+    alert('Something went wrong while saving: '+(err.message||err));
+  } finally {
+    if(saveBtn){ saveBtn.disabled=false; saveBtn.textContent=(uid==='null'||uid===null)?'Create':'Save'; }
   }
-  closeM2(); render();
 }
 async function toggleUser(id){
   APP.users[id].active=!APP.users[id].active;
