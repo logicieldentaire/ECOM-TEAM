@@ -1039,6 +1039,7 @@ function render(){
     ${ni('tasks','▤','My Tasks',rev)}
     ${ni('products','▣','Products')}
     ${ni('testproducts','⬡','Products to Test')}
+    ${ni('stats','◳','Statistics')}
   ` : me.role==='product_lister' ? `
     ${ni('products','▣','Products')}
     ${ni('testproducts','⬡','Products to Test')}
@@ -1048,6 +1049,7 @@ function render(){
     ${ni('reports','▦','Daily Reports')}
     ${ni('products','▣','Products')}
     ${ni('testproducts','⬡','Products to Test')}
+    ${ni('stats','◳','Statistics')}
   `;
 
   const titles={dashboard:'Dashboard',tasks:'Weekly Tasks',pointage:'Pointage — Upload Tracking',reports:'Daily Reports',products:'Products',testproducts:'Products to Test',stats:'Statistics',history:'History',team:'Team & Users'};
