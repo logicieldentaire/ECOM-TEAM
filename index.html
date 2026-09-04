@@ -313,6 +313,8 @@ function rowToTestProduct(r){ return { id:r.id, name:r.name, url:r.url, market:r
 function rowToTask(r){ return { id:r.id, productId:r.product_id, testProductId:r.test_product_id, taskDate:r.task_date, day:r.day, assignedMB:r.assigned_mb, assignedVE:r.assigned_ve, campaignType:r.campaign_type, videoType:r.video_type, voiceOver:r.voice_over, angle:r.angle, variants:r.variants||[], status:r.status, revisionNote:r.revision_note||'', mbNote:r.mb_note||'', managerApproval:r.manager_approval||'pending', deadlineDate:r.deadline_date, isTest:r.is_test||false, testProductName:r.test_product_name||'', testMarket:r.test_market||'', createdAt:r.created_at, updatedAt:r.updated_at }; }
 function rowToReport(r){ return { id:r.id, mbId:r.mb_id, productId:r.product_id, date:r.date, spend:r.spend, leads:r.leads, cpl:r.cpl, platform:r.platform||'Facebook Ads' }; }
 function rowToHistory(r){ return { id:r.id, action:r.action, entity:r.entity, entityId:r.entity_id, description:r.description, byUser:r.by_user, byName:r.by_name, at:r.created_at }; }
+function rowToNote(r){ return { id:r.id, title:r.title, type:r.type||'freeform', content:r.content||{}, updatedAt:r.updated_at, createdAt:r.created_at }; }
+function rowToRestockOrder(r){ return { id:r.id, name:r.name, orderDate:r.order_date, status:r.status||'planning', shippingRatePerCbm:r.shipping_rate_per_cbm||0, shippingCostOverride:r.shipping_cost_override, items:r.items||[], notes:r.notes||'', updatedAt:r.updated_at, createdAt:r.created_at }; }
 
 // ─── APP → DB format converters ───
 function taskToRow(t){ return { product_id:t.productId||null, test_product_id:t.testProductId||null, task_date:t.taskDate, day:t.day, assigned_mb:t.assignedMB, assigned_ve:t.assignedVE, campaign_type:t.campaignType, video_type:t.videoType, voice_over:t.voiceOver, angle:t.angle, variants:t.variants||[], status:t.status, revision_note:t.revisionNote||'', mb_note:t.mbNote||'', manager_approval:t.managerApproval||'pending', deadline_date:t.deadlineDate||null, is_test:t.isTest||false, test_product_name:t.testProductName||'', test_market:t.testMarket||'' }; }
@@ -351,6 +353,8 @@ async function loadAllData(){
     repsResult,
     { data: histData },
     { data: optionsData },
+    { data: notesData },
+    { data: restockData },
   ] = await Promise.all([
     sb.from('users').select('*').order('id').limit(5000),
     fetchAllPaged('products', q=>q.select('*').order('id')),
@@ -359,12 +363,17 @@ async function loadAllData(){
     fetchAllPaged('reports', q=>q.select('*').order('id')),
     sb.from('history').select('*').order('created_at',{ascending:false}).limit(200),
     sb.from('custom_options').select('*'),
+    sb.from('notes').select('*').order('updated_at',{ascending:false}),
+    sb.from('restock_orders').select('*').order('created_at',{ascending:false}),
   ]);
   const prodsData = prodsResult.data;
   const tpData = tpResult.data;
   const repsData = repsResult.data;
 
   setLoad(85,'Processing…');
+
+  if(notesData) APP.notes = notesData.map(rowToNote);
+  if(restockData) APP.restockOrders = restockData.map(rowToRestockOrder);
 
   if(optionsData){
     optionsData.forEach(row=>{
@@ -537,6 +546,8 @@ let APP = {
   tpFilter: { from:'', to:'', status:'', market:'' },
   prodFilter: { status:'', priority:'' },
   prodStatsFilter: { from:'', to:'' },
+  notes: [],
+  restockOrders: [],
 };
 
 // ══════════════════════════════════════════════════════════
@@ -1034,6 +1045,8 @@ function render(){
     ${ni('stats','◳','Statistics')}
     ${ni('history','☰','History')}
     ${ni('team','◎','Team & Users')}
+    ${ni('notes','📝','Notes')}
+    ${ni('restocking','📦','Restocking')}
   ` : me.role==='video_editor' ? `
     ${ni('dashboard','◧','Dashboard')}
     ${ni('tasks','▤','My Tasks',rev)}
@@ -1052,7 +1065,7 @@ function render(){
     ${ni('stats','◳','Statistics')}
   `;
 
-  const titles={dashboard:'Dashboard',tasks:'Weekly Tasks',pointage:'Pointage — Upload Tracking',reports:'Daily Reports',products:'Products',testproducts:'Products to Test',stats:'Statistics',history:'History',team:'Team & Users'};
+  const titles={dashboard:'Dashboard',tasks:'Weekly Tasks',pointage:'Pointage — Upload Tracking',reports:'Daily Reports',products:'Products',testproducts:'Products to Test',stats:'Statistics',history:'History',team:'Team & Users',notes:'Notes',restocking:'Restocking'};
   const subs={
     dashboard: me.role==='admin'?'Select a team member to view their KPIs':'Your performance overview',
     tasks:`Current week · ${wkT().length} tasks`,
@@ -1062,6 +1075,8 @@ function render(){
     testproducts: me.role==='admin'?`${APP.testProducts.length} products in testing`:'Products assigned for testing',
     stats: 'Global team performance — filter by KPI and date',
     history: `${APP.history.length} actions logged`,
+    notes: `${APP.notes.length} note${APP.notes.length!==1?'s':''} — freeform pages or tables`,
+    restocking: `${APP.restockOrders.length} restock order${APP.restockOrders.length!==1?'s':''}`,
     team:`${Object.values(APP.users).length} users`,
   };
 
@@ -1097,6 +1112,8 @@ function renderPage(){
     case 'stats': return pgStats();
     case 'history': return pgHistory();
     case 'team':      return pgTeam();
+    case 'notes':     return pgNotes();
+    case 'restocking': return pgRestocking();
     default:          return pgDash();
   }
 }
@@ -2245,6 +2262,351 @@ function pgHistory(){
 // ══════════════════════════════════════════════════════════
 // TEAM & USERS  (full CRUD)
 // ══════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
+// NOTES — freeform pages or tables, admin brainstorming space
+// ══════════════════════════════════════════════════════════
+function pgNotes(){
+  const notes=APP.notes;
+  return `
+  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+    <button class="btn btn-pri btn-sm" onclick="openNoteCreateModal()">+ New Note</button>
+  </div>
+  <div class="pgrid">
+    ${notes.length===0?`<div class="empty" style="grid-column:1/-1"><div class="empty-i">📝</div><div class="empty-t">No notes yet — jot down ideas, plans, or anything you want to track</div></div>`:''}
+    ${notes.map(n=>{
+      const preview = n.type==='table' ? `Table · ${(n.content?.rows||[]).length} rows × ${(n.content?.headers||[]).length} cols` : (n.content?.text||'(empty page)').slice(0,90);
+      return `<div class="pcard" onclick="openNoteDetail(${n.id})" style="cursor:pointer">
+        <div class="pcard-b">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:6px">
+            <div class="pcard-n">${escHtml(n.title)}</div>
+            ${n.type==='table'?chip('📊 Table','n'):chip('📄 Page','n')}
+          </div>
+          <div style="font-size:12px;color:var(--sub);line-height:1.5;min-height:36px">${escHtml(preview)}${n.type==='freeform'&&(n.content?.text||'').length>90?'…':''}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:8px">Updated ${fmtDate(n.updatedAt)}</div>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function openNoteCreateModal(){
+  document.getElementById('md2').innerHTML=`
+  <div class="mh"><div><div class="mt">New Note</div><div class="ms">Choose a title and format</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
+  <div class="mb">
+    <div class="fg"><label class="fl">Title <span class="rq">*</span></label><input class="fi" id="note_new_title" placeholder="e.g. Q4 supplier ideas"></div>
+    <div class="fg"><label class="fl">Format</label>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button class="btn btn-out" style="flex:1;padding:18px;font-size:13px" onclick="createNote('freeform')">📄<br><br>Freeform Page</button>
+        <button class="btn btn-out" style="flex:1;padding:18px;font-size:13px" onclick="createNote('table')">📊<br><br>Table</button>
+      </div>
+    </div>
+  </div>`;
+  openM2();
+}
+
+async function createNote(type){
+  const title=document.getElementById('note_new_title')?.value?.trim();
+  if(!title){ alert('Please enter a title.'); return; }
+  const content = type==='table' ? {headers:['Column 1','Column 2'], rows:[['','']]} : {text:''};
+  const {data,error} = await sb.from('notes').insert([{title,type,content}]).select().single();
+  if(error){ alert('Could not create note: '+error.message); return; }
+  if(data){ const n=rowToNote(data); APP.notes.unshift(n); closeM2(); openNoteDetail(n.id); }
+}
+
+let _noteTableBuf = { headers:[], rows:[] };
+
+function noteTableGridHTML(){
+  const headers=_noteTableBuf.headers, rows=_noteTableBuf.rows;
+  let html = '<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%">';
+  html += '<tr>';
+  headers.forEach((h,ci)=>{
+    html += '<th style="border:1px solid var(--border);padding:4px;background:var(--s50)">'
+      + '<div style="display:flex;gap:4px;align-items:center">'
+      + '<input class="fi" style="padding:5px 7px;font-size:12px" value="'+escHtml(h)+'" oninput="updateNoteHeader('+ci+',this.value)">'
+      + '<button class="btn btn-ghost btn-xs" onclick="removeNoteCol('+ci+')" type="button">✕</button>'
+      + '</div></th>';
+  });
+  html += '<th style="border:1px solid var(--border);padding:4px;width:40px"><button class="btn btn-ghost btn-xs" onclick="addNoteCol()" type="button">+</button></th></tr>';
+  rows.forEach((row,ri)=>{
+    html += '<tr>';
+    row.forEach((cell,ci)=>{
+      html += '<td style="border:1px solid var(--border);padding:2px">'
+        + '<input class="fi" style="border:none;padding:6px 7px;font-size:12px" value="'+escHtml(cell)+'" oninput="updateNoteCell('+ri+','+ci+',this.value)">'
+        + '</td>';
+    });
+    html += '<td style="border:1px solid var(--border);text-align:center"><button class="btn btn-ghost btn-xs" onclick="removeNoteRow('+ri+')" type="button">✕</button></td></tr>';
+  });
+  html += '</table></div><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addNoteRow()" type="button">+ Add row</button>';
+  return html;
+}
+function updateNoteHeader(ci,val){ _noteTableBuf.headers[ci]=val; }
+function updateNoteCell(ri,ci,val){ _noteTableBuf.rows[ri][ci]=val; }
+function addNoteRow(){ _noteTableBuf.rows.push(_noteTableBuf.headers.map(()=>'')); document.getElementById('noteTableWrap').innerHTML=noteTableGridHTML(); }
+function removeNoteRow(ri){ _noteTableBuf.rows.splice(ri,1); document.getElementById('noteTableWrap').innerHTML=noteTableGridHTML(); }
+function addNoteCol(){ _noteTableBuf.headers.push('Column '+(_noteTableBuf.headers.length+1)); _noteTableBuf.rows.forEach(r=>r.push('')); document.getElementById('noteTableWrap').innerHTML=noteTableGridHTML(); }
+function removeNoteCol(ci){ _noteTableBuf.headers.splice(ci,1); _noteTableBuf.rows.forEach(r=>r.splice(ci,1)); document.getElementById('noteTableWrap').innerHTML=noteTableGridHTML(); }
+
+function openNoteDetail(id){
+  const n=APP.notes.find(x=>x.id===id);
+  if(!n){ alert('Note not found — try refreshing.'); return; }
+  let bodyHtml;
+  if(n.type==='table'){
+    _noteTableBuf = { headers:[...(n.content?.headers||['Column 1'])], rows:(n.content?.rows||[['']]).map(r=>[...r]) };
+    bodyHtml = '<div id="noteTableWrap">'+noteTableGridHTML()+'</div>';
+  } else {
+    bodyHtml = '<textarea class="fi" id="note_text" rows="18" style="width:100%;font-family:inherit;resize:vertical">'+escHtml(n.content?.text||'')+'</textarea>';
+  }
+  document.getElementById('md2').innerHTML=`
+  <div class="mh">
+    <div style="flex:1;min-width:0"><input class="fi" id="note_title" value="${escHtml(n.title)}" style="font-size:15px;font-weight:700"></div>
+    <div style="display:flex;gap:8px;flex-shrink:0">
+      <button class="btn btn-bad btn-sm" onclick="deleteNote(${n.id})">Delete</button>
+      <button class="btn btn-out btn-sm" onclick="closeM2()">✕</button>
+    </div>
+  </div>
+  <div class="mb">${bodyHtml}</div>
+  <div class="mf"><button class="btn btn-out" onclick="closeM2()">Cancel</button><button class="btn btn-pri" onclick="saveNote(${n.id})">Save</button></div>`;
+  openM2();
+}
+
+async function saveNote(id){
+  const n=APP.notes.find(x=>x.id===id);
+  if(!n) return;
+  const title=document.getElementById('note_title')?.value?.trim()||n.title;
+  const content = n.type==='table'
+    ? { headers:[..._noteTableBuf.headers], rows:_noteTableBuf.rows.map(r=>[...r]) }
+    : { text: document.getElementById('note_text')?.value||'' };
+  const {data,error} = await sb.from('notes').update({title,content,updated_at:new Date().toISOString()}).eq('id',id).select();
+  if(error){ alert('Save failed: '+error.message); return; }
+  if(!data||data.length===0){ alert('Warning: note not found in database — not saved. Please refresh and try again.'); return; }
+  n.title=title; n.content=content; n.updatedAt=new Date().toISOString();
+  closeM2(); render();
+}
+
+async function deleteNote(id){
+  if(!confirm('Delete this note permanently?')) return;
+  const {error}=await sb.from('notes').delete().eq('id',id);
+  if(error){ alert('Delete failed: '+error.message); return; }
+  APP.notes=APP.notes.filter(n=>n.id!==id);
+  closeM2(); render();
+}
+
+// ══════════════════════════════════════════════════════════
+// RESTOCKING — restock orders with product/quantity selection,
+// supplier price, CBM, and a live shipment budget simulator
+// ══════════════════════════════════════════════════════════
+function calcRestockTotals(order){
+  const items=order.items||[];
+  const totalUnits=items.reduce((s,it)=>s+(parseFloat(it.quantity)||0),0);
+  const totalPurchase=items.reduce((s,it)=>s+((parseFloat(it.quantity)||0)*(parseFloat(it.supplierPrice)||0)),0);
+  const totalCbm=items.reduce((s,it)=>s+((parseFloat(it.quantity)||0)*(parseFloat(it.cbmPerUnit)||0)),0);
+  const hasOverride = order.shippingCostOverride!==null && order.shippingCostOverride!==undefined && order.shippingCostOverride!=='';
+  const shippingCost = hasOverride ? parseFloat(order.shippingCostOverride) : totalCbm*(parseFloat(order.shippingRatePerCbm)||0);
+  const grandTotal = totalPurchase + (isNaN(shippingCost)?0:shippingCost);
+  return { totalUnits, totalPurchase, totalCbm, shippingCost: isNaN(shippingCost)?0:shippingCost, grandTotal };
+}
+
+function pgRestocking(){
+  const orders=APP.restockOrders;
+  const statusStyle={planning:'n',ordered:'w',shipped:'a',received:'ok'};
+  const statusLabel={planning:'📝 Planning',ordered:'📦 Ordered',shipped:'🚢 Shipped',received:'✓ Received'};
+  return `
+  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+    <button class="btn btn-pri btn-sm" onclick="openRestockForm()">+ New Restock Order</button>
+  </div>
+  <div class="pgrid">
+    ${orders.length===0?`<div class="empty" style="grid-column:1/-1"><div class="empty-i">📦</div><div class="empty-t">No restock orders yet</div></div>`:''}
+    ${orders.map(o=>{
+      const t=calcRestockTotals(o);
+      return `<div class="pcard" onclick="openRestockForm(${o.id})" style="cursor:pointer">
+        <div class="pcard-b">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:6px">
+            <div class="pcard-n">${escHtml(o.name)}</div>
+            ${chip(statusLabel[o.status]||o.status, statusStyle[o.status]||'n')}
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${o.orderDate?fmtDate(o.orderDate):'No date set'} · ${(o.items||[]).length} product${(o.items||[]).length!==1?'s':''} · ${t.totalUnits} units</div>
+          <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Purchase: <b style="color:var(--ink)">$${t.totalPurchase.toFixed(2)}</b> · Shipping: <b style="color:var(--ink)">$${t.shippingCost.toFixed(2)}</b></div>
+          <div style="padding-top:8px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase">Grand total</span>
+            <span style="font-size:18px;font-weight:800;color:var(--accent)">$${t.grandTotal.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+let _restockBuf = { items: [] };
+
+function restockProductOptionsHTML(selectedType, selectedId){
+  let html='<option value="">— Select product —</option><optgroup label="Catalog Products">';
+  APP.products.forEach(p=>{
+    const sel=(selectedType==='catalog'&&String(selectedId)===String(p.id))?'selected':'';
+    html+='<option value="catalog:'+p.id+'" '+sel+'>'+escHtml(p.name)+' ('+p.market+')</option>';
+  });
+  html+='</optgroup><optgroup label="Test Products">';
+  APP.testProducts.forEach(p=>{
+    const sel=(selectedType==='test'&&String(selectedId)===String(p.id))?'selected':'';
+    html+='<option value="test:'+p.id+'" '+sel+'>'+escHtml(p.name)+' ('+p.market+') 🧪</option>';
+  });
+  html+='</optgroup>';
+  return html;
+}
+
+function restockItemsTableHTML(){
+  let html='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+    +'<thead><tr>'
+    +'<th style="text-align:left;padding:6px;font-size:10px;color:var(--muted);text-transform:uppercase">Product</th>'
+    +'<th style="text-align:left;padding:6px;font-size:10px;color:var(--muted);text-transform:uppercase;width:90px">Qty</th>'
+    +'<th style="text-align:left;padding:6px;font-size:10px;color:var(--muted);text-transform:uppercase;width:120px">Supplier price</th>'
+    +'<th style="text-align:left;padding:6px;font-size:10px;color:var(--muted);text-transform:uppercase;width:110px">CBM / unit</th>'
+    +'<th style="text-align:right;padding:6px;font-size:10px;color:var(--muted);text-transform:uppercase;width:100px">Line total</th>'
+    +'<th style="width:34px"></th></tr></thead><tbody>';
+  _restockBuf.items.forEach((it,i)=>{
+    const lineTotal=(parseFloat(it.quantity)||0)*(parseFloat(it.supplierPrice)||0);
+    html+='<tr style="border-top:1px solid var(--border)">'
+      +'<td style="padding:5px"><select class="fi" style="padding:6px 8px;font-size:12px" onchange="updateRestockItemProduct('+i+',this.value)">'+restockProductOptionsHTML(it.productType,it.productId)+'</select></td>'
+      +'<td style="padding:5px"><input class="fi" type="number" min="0" style="padding:6px 8px;font-size:12px" value="'+(it.quantity||'')+'" oninput="updateRestockItemField('+i+',\'quantity\',this.value)"></td>'
+      +'<td style="padding:5px"><input class="fi" type="number" min="0" step="0.01" style="padding:6px 8px;font-size:12px" value="'+(it.supplierPrice||'')+'" oninput="updateRestockItemField('+i+',\'supplierPrice\',this.value)"></td>'
+      +'<td style="padding:5px"><input class="fi" type="number" min="0" step="0.001" style="padding:6px 8px;font-size:12px" value="'+(it.cbmPerUnit||'')+'" oninput="updateRestockItemField('+i+',\'cbmPerUnit\',this.value)"></td>'
+      +'<td style="padding:5px;text-align:right;font-weight:700;font-size:12px">$'+lineTotal.toFixed(2)+'</td>'
+      +'<td style="padding:5px;text-align:center"><button class="btn btn-ghost btn-xs" onclick="removeRestockItem('+i+')" type="button">✕</button></td></tr>';
+  });
+  html+='</tbody></table></div>';
+  return html;
+}
+
+function restockSummaryHTML(){
+  const shipRate=parseFloat(document.getElementById('rk_shiprate')?.value)||0;
+  const shipOverrideRaw=document.getElementById('rk_shipoverride')?.value;
+  const totalUnits=_restockBuf.items.reduce((s,it)=>s+(parseFloat(it.quantity)||0),0);
+  const totalPurchase=_restockBuf.items.reduce((s,it)=>s+((parseFloat(it.quantity)||0)*(parseFloat(it.supplierPrice)||0)),0);
+  const totalCbm=_restockBuf.items.reduce((s,it)=>s+((parseFloat(it.quantity)||0)*(parseFloat(it.cbmPerUnit)||0)),0);
+  const shippingCost=(shipOverrideRaw!==undefined&&shipOverrideRaw!=='')?parseFloat(shipOverrideRaw):totalCbm*shipRate;
+  const safeShip=isNaN(shippingCost)?0:shippingCost;
+  const grandTotal=totalPurchase+safeShip;
+  return '<div class="g3">'
+    +'<div class="stat"><div class="stat-v">'+totalUnits+'</div><div class="stat-l">Total units</div></div>'
+    +'<div class="stat"><div class="stat-v">'+totalCbm.toFixed(3)+'</div><div class="stat-l">Total CBM</div></div>'
+    +'<div class="stat"><div class="stat-v">$'+totalPurchase.toFixed(2)+'</div><div class="stat-l">Purchase cost</div></div>'
+    +'</div>'
+    +'<div style="margin-top:12px;padding:14px;background:var(--accent-bg);border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">'
+    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase">Shipping cost</div><div style="font-size:15px;font-weight:700">$'+safeShip.toFixed(2)+'</div></div>'
+    +'<div style="text-align:right"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase">Grand total budget</div><div style="font-size:24px;font-weight:800;color:var(--accent)">$'+grandTotal.toFixed(2)+'</div></div>'
+    +'</div>';
+}
+
+function refreshRestockCalc(){
+  const itemsWrap=document.getElementById('restockItemsWrap');
+  if(itemsWrap) itemsWrap.innerHTML=restockItemsTableHTML();
+  const summaryWrap=document.getElementById('restockSummaryWrap');
+  if(summaryWrap) summaryWrap.innerHTML=restockSummaryHTML();
+}
+function updateRestockItemField(i,field,val){ _restockBuf.items[i][field]=val; refreshRestockCalc(); }
+function updateRestockItemProduct(i,val){
+  if(!val){ _restockBuf.items[i].productType=null; _restockBuf.items[i].productId=null; _restockBuf.items[i].productName=''; refreshRestockCalc(); return; }
+  const [type,idStr]=val.split(':');
+  const idNum=parseInt(idStr);
+  const prod=type==='catalog'?pr(idNum):APP.testProducts.find(p=>p.id===idNum);
+  _restockBuf.items[i].productType=type;
+  _restockBuf.items[i].productId=idNum;
+  _restockBuf.items[i].productName=prod?prod.name:'';
+  refreshRestockCalc();
+}
+function addRestockItem(){ _restockBuf.items.push({productType:null,productId:null,productName:'',quantity:'',supplierPrice:'',cbmPerUnit:''}); refreshRestockCalc(); }
+function removeRestockItem(i){ _restockBuf.items.splice(i,1); refreshRestockCalc(); }
+
+function openRestockForm(id=null){
+  const isEdit=id!==null;
+  const order=isEdit?APP.restockOrders.find(o=>o.id===id):null;
+  if(isEdit&&!order){ alert('Order not found — try refreshing.'); return; }
+  _restockBuf = { items: isEdit ? (order.items||[]).map(it=>({...it})) : [{productType:null,productId:null,productName:'',quantity:'',supplierPrice:'',cbmPerUnit:''}] };
+
+  document.getElementById('md2').innerHTML=`
+  <div class="mh"><div><div class="mt">${isEdit?'Edit Restock Order':'New Restock Order'}</div><div class="ms">Select products, quantities & supplier prices — budget calculates automatically</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
+  <div class="mb">
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div class="fg" style="flex:2;min-width:200px"><label class="fl">Order name <span class="rq">*</span></label><input class="fi" id="rk_name" value="${isEdit?escHtml(order.name):''}" placeholder="e.g. August restock — China supplier"></div>
+      <div class="fg" style="flex:1;min-width:140px"><label class="fl">Date</label><input class="fi" id="rk_date" type="date" value="${isEdit&&order.orderDate?order.orderDate:todayYMD()}"></div>
+    </div>
+    <div class="fg">
+      <label class="fl">Status</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${['planning','ordered','shipped','received'].map(s=>`<button class="upill ${(isEdit?order.status:'planning')===s?'on':''}" id="rks_${s}" type="button" onclick="setRestockStatus('${s}')">${s==='planning'?'📝 Planning':s==='ordered'?'📦 Ordered':s==='shipped'?'🚢 Shipped':'✓ Received'}</button>`).join('')}
+      </div>
+      <input type="hidden" id="rk_status" value="${isEdit?order.status:'planning'}">
+    </div>
+    <div class="divider"></div>
+    <div class="sec-t">Products in this restock</div>
+    <div id="restockItemsWrap">${restockItemsTableHTML()}</div>
+    <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addRestockItem()" type="button">+ Add product line</button>
+    <div class="divider"></div>
+    <div class="sec-t">Shipping</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div class="fg" style="flex:1;min-width:160px"><label class="fl">Shipping rate ($ per CBM)</label><input class="fi" id="rk_shiprate" type="number" min="0" step="0.01" value="${isEdit?(order.shippingRatePerCbm||''):''}" placeholder="0.00" oninput="refreshRestockCalc()"></div>
+      <div class="fg" style="flex:1;min-width:160px"><label class="fl">Or fixed shipping cost <span style="font-weight:400;color:var(--muted)">(overrides rate)</span></label><input class="fi" id="rk_shipoverride" type="number" min="0" step="0.01" value="${isEdit&&order.shippingCostOverride!=null?order.shippingCostOverride:''}" placeholder="Leave empty to use rate" oninput="refreshRestockCalc()"></div>
+    </div>
+    <div class="divider"></div>
+    <div class="sec-t">Budget simulator</div>
+    <div id="restockSummaryWrap">${restockSummaryHTML()}</div>
+    <div class="divider"></div>
+    <div class="fg"><label class="fl">Notes</label><textarea class="fi" id="rk_notes" rows="2" placeholder="Supplier contact, tracking number, anything useful...">${isEdit?escHtml(order.notes||''):''}</textarea></div>
+  </div>
+  <div class="mf">
+    ${isEdit?`<button class="btn btn-bad btn-sm" onclick="deleteRestockOrder(${id})" style="margin-right:auto">Delete</button>`:''}
+    <button class="btn btn-out" onclick="closeM2()">Cancel</button>
+    <button class="btn btn-pri" onclick="saveRestockOrder(${isEdit?id:'null'})">${isEdit?'Save':'Create order'}</button>
+  </div>`;
+  openM2();
+}
+function setRestockStatus(s){
+  ['planning','ordered','shipped','received'].forEach(st=>{
+    const el=document.getElementById('rks_'+st);
+    if(el) el.classList.toggle('on', st===s);
+  });
+  document.getElementById('rk_status').value=s;
+}
+
+async function saveRestockOrder(id){
+  const isNew = id==='null'||id===null;
+  const name=document.getElementById('rk_name')?.value?.trim();
+  const date=document.getElementById('rk_date')?.value||null;
+  const status=document.getElementById('rk_status')?.value||'planning';
+  const shipRate=parseFloat(document.getElementById('rk_shiprate')?.value)||0;
+  const shipOverrideRaw=document.getElementById('rk_shipoverride')?.value;
+  const shipOverride=(shipOverrideRaw!==undefined&&shipOverrideRaw!=='')?parseFloat(shipOverrideRaw):null;
+  const notes=document.getElementById('rk_notes')?.value?.trim()||'';
+  if(!name){ alert('Please enter an order name.'); return; }
+  const items=_restockBuf.items.filter(it=>it.productId);
+  if(!items.length){ alert('Add at least one product to this restock order.'); return; }
+
+  const row={ name, order_date:date, status, shipping_rate_per_cbm:shipRate, shipping_cost_override:shipOverride, items, notes };
+
+  if(isNew){
+    const {data,error}=await sb.from('restock_orders').insert([row]).select().single();
+    if(error){ alert('Could not save: '+error.message); return; }
+    if(data) APP.restockOrders.unshift(rowToRestockOrder(data));
+    await logHistory('created','restock',data?.id||0,`Created restock order "${name}" — ${items.length} product(s)`);
+  } else {
+    const numId=parseInt(id)||id;
+    const {data,error}=await sb.from('restock_orders').update(row).eq('id',numId).select();
+    if(error){ alert('Save failed: '+error.message); return; }
+    if(!data||data.length===0){ alert('Warning: order not found in database — not saved. Please refresh and try again.'); return; }
+    const o=APP.restockOrders.find(x=>x.id===numId);
+    if(o) Object.assign(o,{name,orderDate:date,status,shippingRatePerCbm:shipRate,shippingCostOverride:shipOverride,items,notes});
+    await logHistory('updated','restock',numId,`Edited restock order "${name}"`);
+  }
+  closeM2(); render();
+}
+
+async function deleteRestockOrder(id){
+  if(!confirm('Delete this restock order permanently?')) return;
+  const {error}=await sb.from('restock_orders').delete().eq('id',id);
+  if(error){ alert('Delete failed: '+error.message); return; }
+  APP.restockOrders=APP.restockOrders.filter(o=>o.id!==id);
+  closeM2(); render();
+}
+
 function pgTeam(){
   const mbs=Object.values(APP.users).filter(x=>x.role==='media_buyer');
   const ves=Object.values(APP.users).filter(x=>x.role==='video_editor');
