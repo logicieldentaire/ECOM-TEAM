@@ -2770,6 +2770,7 @@ function pgOrganicPipeline(){
   const isAdmin=me.role==='admin';
   const items=isAdmin?APP.orgPipeline:APP.orgPipeline.filter(p=>p.assignedTo===me.id);
   const statusStyle={pending:'w',posted:'ok'};
+  const statusLabel={pending:'⏳ Not yet',posted:'✓ Done'};
 
   return `
   <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
@@ -2782,56 +2783,81 @@ function pgOrganicPipeline(){
       <div class="pcard-b">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:8px">
           <div style="font-size:10px;color:var(--muted)">${isAdmin?(APP.users[it.assignedTo]?.name||'Unassigned'):''}</div>
-          ${chip(it.status==='posted'?'✓ Posted':'⏳ Pending',statusStyle[it.status]||'n')}
+          ${chip(statusLabel[it.status]||it.status,statusStyle[it.status]||'n')}
         </div>
         <div style="font-size:13px;color:var(--ink);line-height:1.5;margin-bottom:10px">${escHtml(it.description)}</div>
         ${it.postLink?`<a href="${it.postLink}" target="_blank" style="font-size:11px;color:var(--accent);display:block;margin-bottom:6px">🔗 Open link</a>`:''}
         ${it.adCopy?`<div style="font-size:11px;color:var(--sub);padding:8px;background:var(--s50);border-radius:7px;margin-bottom:8px">${escHtml(it.adCopy)}</div>`:''}
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
-          <div style="font-size:10px;color:var(--muted)">${fmtDate((it.createdAt||'').slice(0,10))}</div>
-          ${(!isAdmin&&it.status==='pending')?`<button class="btn btn-pri btn-xs" onclick="markOrgPipelinePosted(${it.id})">Mark Posted</button>`:''}
-          ${isAdmin?`<button class="btn btn-ghost btn-xs" onclick="deleteOrgPipelineItem(${it.id})">Delete</button>`:''}
+        <div style="margin-top:10px">
+          <div style="display:flex;gap:6px;margin-bottom:8px">
+            <button class="btn btn-xs ${it.status==='posted'?'btn-pri':'btn-out'}" onclick="setOrgPipelineStatus(${it.id},'posted')">✓ Done</button>
+            <button class="btn btn-xs ${it.status==='pending'?'btn-pri':'btn-out'}" onclick="setOrgPipelineStatus(${it.id},'pending')">⏳ Not yet</button>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="font-size:10px;color:var(--muted)">${fmtDate((it.createdAt||'').slice(0,10))}</div>
+            ${isAdmin?`<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-xs" onclick="openOrgPipelineForm(${it.id})">Edit</button><button class="btn btn-ghost btn-xs" onclick="deleteOrgPipelineItem(${it.id})">Delete</button></div>`:''}
+          </div>
         </div>
       </div>
     </div>`).join('')}
   </div>`;
 }
 
-function openOrgPipelineForm(){
+function openOrgPipelineForm(id=null){
+  const isEdit = id!==null;
+  const item = isEdit ? APP.orgPipeline.find(x=>x.id===id) : null;
+  if(isEdit && !item){ alert('Content item not found — try refreshing.'); return; }
   const employees=Object.values(APP.users).filter(x=>userHasAccess(x.id,'organicpipeline'));
   document.getElementById('md1').innerHTML=`
-  <div class="mh"><div><div class="mt">New Content Item</div><div class="ms">A post request, concept, or piece of content to publish</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
+  <div class="mh"><div><div class="mt">${isEdit?'Edit Content Item':'New Content Item'}</div><div class="ms">A post request, concept, or piece of content to publish</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
   <div class="mb">
-    <div class="fg"><label class="fl">Description / concept <span class="rq">*</span></label><textarea class="fi" id="op_desc" rows="3" placeholder="e.g. Post a screenshot of a WhatsApp review — blur the client's number"></textarea></div>
-    <div class="fg"><label class="fl">Post link <span style="font-weight:400;color:var(--muted)">(optional — if content is ready)</span></label><input class="fi" id="op_link" placeholder="https://drive.google.com/..."></div>
-    <div class="fg"><label class="fl">Ad copy / caption <span style="font-weight:400;color:var(--muted)">(optional)</span></label><textarea class="fi" id="op_adcopy" rows="3" placeholder="Caption text to use..."></textarea></div>
+    <div class="fg"><label class="fl">Description / concept <span class="rq">*</span></label><textarea class="fi" id="op_desc" rows="3" placeholder="e.g. Post a screenshot of a WhatsApp review — blur the client's number">${isEdit?escHtml(item.description):''}</textarea></div>
+    <div class="fg"><label class="fl">Post link <span style="font-weight:400;color:var(--muted)">(optional — if content is ready)</span></label><input class="fi" id="op_link" value="${isEdit?escHtml(item.postLink||''):''}" placeholder="https://drive.google.com/..."></div>
+    <div class="fg"><label class="fl">Ad copy / caption <span style="font-weight:400;color:var(--muted)">(optional)</span></label><textarea class="fi" id="op_adcopy" rows="3" placeholder="Caption text to use...">${isEdit?escHtml(item.adCopy||''):''}</textarea></div>
     <div class="fg"><label class="fl">Assign to</label>
-      <select class="fi" id="op_assignee"><option value="">— Unassigned —</option>${employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}</select>
+      <select class="fi" id="op_assignee"><option value="">— Unassigned —</option>${employees.map(e=>`<option value="${e.id}" ${isEdit&&String(item.assignedTo)===String(e.id)?'selected':''}>${e.name}</option>`).join('')}</select>
     </div>
   </div>
-  <div class="mf"><button class="btn btn-out" onclick="closeM1()">Cancel</button><button class="btn btn-pri" onclick="saveOrgPipelineItem()">Create</button></div>`;
+  <div class="mf">
+    ${isEdit?`<button class="btn btn-bad btn-sm" onclick="deleteOrgPipelineItem(${id})" style="margin-right:auto">Delete</button>`:''}
+    <button class="btn btn-out" onclick="closeM1()">Cancel</button>
+    <button class="btn btn-pri" onclick="saveOrgPipelineItem(${isEdit?id:'null'})">${isEdit?'Save changes':'Create'}</button>
+  </div>`;
   openM1();
 }
 
-async function saveOrgPipelineItem(){
+async function saveOrgPipelineItem(id){
+  const isNew = id==='null'||id===null;
   const description=document.getElementById('op_desc')?.value?.trim();
   const postLink=document.getElementById('op_link')?.value?.trim()||'';
   const adCopy=document.getElementById('op_adcopy')?.value?.trim()||'';
   const assignedTo=document.getElementById('op_assignee')?.value||null;
   if(!description){ alert('Please enter a description.'); return; }
-  const {data,error}=await sb.from('organic_content_pipeline').insert([{description,post_link:postLink,ad_copy:adCopy,assigned_to:assignedTo,status:'pending'}]).select().single();
-  if(error){ alert('Could not save: '+error.message); return; }
-  if(data) APP.orgPipeline.unshift(rowToOrgPipelineItem(data));
-  await logHistory('created','organic_pipeline',data?.id||0,`Created content item: ${description.slice(0,50)}`);
+
+  if(isNew){
+    const {data,error}=await sb.from('organic_content_pipeline').insert([{description,post_link:postLink,ad_copy:adCopy,assigned_to:assignedTo,status:'pending'}]).select().single();
+    if(error){ alert('Could not save: '+error.message); return; }
+    if(data) APP.orgPipeline.unshift(rowToOrgPipelineItem(data));
+    await logHistory('created','organic_pipeline',data?.id||0,`Created content item: ${description.slice(0,50)}`);
+  } else {
+    const numId=parseInt(id)||id;
+    const {data,error}=await sb.from('organic_content_pipeline').update({description,post_link:postLink,ad_copy:adCopy,assigned_to:assignedTo}).eq('id',numId).select();
+    if(error){ alert('Save failed: '+error.message); return; }
+    if(!data||data.length===0){ alert('Warning: item not found in database — not saved. Refresh and try again.'); return; }
+    const it=APP.orgPipeline.find(x=>x.id===numId);
+    if(it) Object.assign(it,{description,postLink,adCopy,assignedTo});
+    await logHistory('updated','organic_pipeline',numId,`Edited content item: ${description.slice(0,50)}`);
+  }
   closeM1(); render();
 }
 
-async function markOrgPipelinePosted(id){
-  const {data,error}=await sb.from('organic_content_pipeline').update({status:'posted',posted_at:new Date().toISOString()}).eq('id',id).select();
+async function setOrgPipelineStatus(id,status){
+  const upd = { status, posted_at: status==='posted' ? new Date().toISOString() : null };
+  const {data,error}=await sb.from('organic_content_pipeline').update(upd).eq('id',id).select();
   if(error){ alert('Save failed: '+error.message); return; }
   if(!data||data.length===0){ alert('Warning: item not found — not saved.'); return; }
   const it=APP.orgPipeline.find(x=>x.id===id);
-  if(it){ it.status='posted'; it.postedAt=new Date().toISOString(); }
+  if(it){ it.status=status; it.postedAt=upd.posted_at; }
   render();
 }
 
@@ -2840,7 +2866,7 @@ async function deleteOrgPipelineItem(id){
   const {error}=await sb.from('organic_content_pipeline').delete().eq('id',id);
   if(error){ alert('Delete failed: '+error.message); return; }
   APP.orgPipeline=APP.orgPipeline.filter(x=>x.id!==id);
-  render();
+  closeM1(); render();
 }
 
 function pgTeam(){
