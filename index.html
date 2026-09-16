@@ -2597,6 +2597,9 @@ function openOrgLeadForm(id=null){
   const isEdit = id!==null;
   const lead = isEdit ? APP.orgLeads.find(l=>l.id===id) : null;
   if(isEdit && !lead){ alert('Lead not found — try refreshing.'); return; }
+  const me=u();
+  const canSetStatus = isEdit && me.role==='admin';
+  const statusLabel={not_shipped:'Not shipped',shipped:'Shipped',delivered:'Delivered'};
   document.getElementById('md1').innerHTML=`
   <div class="mh"><div><div class="mt">${isEdit?'Edit Lead':'Add Lead'}</div><div class="ms">${isEdit?'Update the details of this lead':'Log a new lead you collected from organic content'}</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
   <div class="mb">
@@ -2620,6 +2623,15 @@ function openOrgLeadForm(id=null){
       <div class="fg" style="flex:1"><label class="fl">Quantity ordered</label><input class="fi" type="number" min="1" id="ol_qty" value="${isEdit?lead.quantity||1:1}" placeholder="1"></div>
     </div>
     <div class="fg"><label class="fl">Order description <span style="font-weight:400;color:var(--muted)">(bundle, extra details...)</span></label><textarea class="fi" id="ol_desc" rows="2" placeholder="e.g. Bundle of 2, includes free gift...">${isEdit?escHtml(lead.orderDescription||''):''}</textarea></div>
+    ${canSetStatus?`
+    <div class="divider"></div>
+    <div class="fg">
+      <label class="fl">Shipping status</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${['not_shipped','shipped','delivered'].map(s=>`<button class="upill ${lead.status===s?'on':''}" id="ols_${s}" type="button" onclick="setOrgLeadFormStatus('${s}')">${s==='not_shipped'?'⏳':s==='shipped'?'📦':'✓'} ${statusLabel[s]}</button>`).join('')}
+      </div>
+      <input type="hidden" id="ol_status" value="${lead.status||'not_shipped'}">
+    </div>`:''}
   </div>
   <div class="mf">
     ${isEdit?`<button class="btn btn-bad btn-sm" onclick="deleteOrgLead(${id})" style="margin-right:auto">Delete</button>`:''}
@@ -2627,6 +2639,13 @@ function openOrgLeadForm(id=null){
     <button class="btn btn-pri" onclick="saveOrgLead(${isEdit?id:'null'})">${isEdit?'Save changes':'Save Lead'}</button>
   </div>`;
   openM1();
+}
+function setOrgLeadFormStatus(s){
+  ['not_shipped','shipped','delivered'].forEach(st=>{
+    const el=document.getElementById('ols_'+st);
+    if(el) el.classList.toggle('on', st===s);
+  });
+  document.getElementById('ol_status').value=s;
 }
 
 async function saveOrgLead(id){
@@ -2647,6 +2666,8 @@ async function saveOrgLead(id){
   if(!platform||!name){ alert('Platform and name are required.'); return; }
 
   const row={ entry_date:entryDate, platform, name, city, phone, product_id:productId, product_name:productName, price_ksh:priceKsh, quantity, order_description:orderDescription };
+  const statusEl=document.getElementById('ol_status');
+  if(statusEl) row.status = statusEl.value; // only present when admin is editing an existing lead
 
   if(isNew){
     const {data,error}=await sb.from('organic_leads').insert([{...row, employee_id:me.id, status:'not_shipped'}]).select().single();
@@ -2659,8 +2680,8 @@ async function saveOrgLead(id){
     if(error){ alert('Save failed: '+error.message); return; }
     if(!data||data.length===0){ alert('Warning: lead not found in database — not saved. Refresh and try again.'); return; }
     const l=APP.orgLeads.find(x=>x.id===numId);
-    if(l) Object.assign(l,{entryDate,platform,name,city,phone,productId,productName,priceKsh,quantity,orderDescription});
-    await logHistory('updated','organic_lead',numId,`Edited lead: ${name}`);
+    if(l) Object.assign(l,{entryDate,platform,name,city,phone,productId,productName,priceKsh,quantity,orderDescription},row.status?{status:row.status}:{});
+    await logHistory('updated','organic_lead',numId,`Edited lead: ${name}${row.status?' — status: '+row.status:''}`);
   }
   closeM1(); render();
 }
