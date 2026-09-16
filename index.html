@@ -2573,20 +2573,18 @@ function pgOrganicLeads(){
     <button class="btn btn-pri btn-sm" onclick="openOrgLeadForm()">+ Add Lead</button>
   </div>
   <div class="tw"><table>
-    <thead><tr>${isAdmin?'<th>Employee</th>':''}<th>Date</th><th>Platform</th><th>Name</th><th>City</th><th>Phone</th><th>Product</th><th>Price (KSH)</th><th>Qty</th><th>Status</th><th></th></tr></thead>
+    <thead><tr>${isAdmin?'<th>Employee</th>':''}<th>Date</th><th>Platform</th><th>Name</th><th>Status</th><th>Phone</th><th>City</th><th>Order</th><th></th></tr></thead>
     <tbody>
-    ${leads.length===0?`<tr><td colspan="${isAdmin?11:10}"><div class="empty" style="padding:24px"><div class="empty-i">🎯</div><div class="empty-t">No leads logged yet</div></div></td></tr>`:''}
+    ${leads.length===0?`<tr><td colspan="${isAdmin?9:8}"><div class="empty" style="padding:24px"><div class="empty-i">🎯</div><div class="empty-t">No leads logged yet</div></div></td></tr>`:''}
     ${leads.slice().sort((a,b)=>(b.entryDate||b.createdAt||'').localeCompare(a.entryDate||a.createdAt||'')).map(l=>`<tr>
       ${isAdmin?`<td>${av(l.employeeId,22)} ${APP.users[l.employeeId]?.name||l.employeeId}</td>`:''}
       <td>${fmtDate(l.entryDate||(l.createdAt||'').slice(0,10))}</td>
       <td>${orgPlatformIcon(l.platform)} ${l.platform}</td>
       <td><b>${escHtml(l.name)}</b></td>
-      <td>${escHtml(l.city)}</td>
-      <td>${escHtml(l.phone)}</td>
-      <td>${escHtml(l.productName)||'<span style="color:var(--muted)">—</span>'}</td>
-      <td>${l.priceKsh!=null?l.priceKsh:'<span style="color:var(--muted)">—</span>'}</td>
-      <td>${l.quantity||1}</td>
       <td>${isAdmin?`<select class="fi" style="padding:5px 8px;font-size:11px;width:auto" onchange="updateOrgLeadStatus(${l.id},this.value)">${['not_shipped','shipped','delivered'].map(s=>`<option value="${s}" ${l.status===s?'selected':''}>${statusLabel[s]}</option>`).join('')}</select>`:chip(statusLabel[l.status]||l.status,statusStyle[l.status]||'n')}</td>
+      <td>${escHtml(l.phone)}</td>
+      <td>${escHtml(l.city)}</td>
+      <td style="white-space:nowrap">${l.productName?escHtml(l.productName):'<span style="color:var(--muted)">—</span>'}${l.quantity>1?` ×${l.quantity}`:''}${l.priceKsh!=null?` · ${l.priceKsh} KSH`:''}</td>
       <td><button class="btn btn-ghost btn-xs" onclick="openOrgLeadForm(${l.id})">Edit</button></td>
     </tr>`).join('')}
     </tbody>
