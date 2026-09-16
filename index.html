@@ -313,8 +313,11 @@ function rowToTestProduct(r){ return { id:r.id, name:r.name, url:r.url, market:r
 function rowToTask(r){ return { id:r.id, productId:r.product_id, testProductId:r.test_product_id, taskDate:r.task_date, day:r.day, assignedMB:r.assigned_mb, assignedVE:r.assigned_ve, campaignType:r.campaign_type, videoType:r.video_type, voiceOver:r.voice_over, angle:r.angle, variants:r.variants||[], status:r.status, revisionNote:r.revision_note||'', mbNote:r.mb_note||'', managerApproval:r.manager_approval||'pending', deadlineDate:r.deadline_date, isTest:r.is_test||false, testProductName:r.test_product_name||'', testMarket:r.test_market||'', createdAt:r.created_at, updatedAt:r.updated_at }; }
 function rowToReport(r){ return { id:r.id, mbId:r.mb_id, productId:r.product_id, date:r.date, spend:r.spend, leads:r.leads, cpl:r.cpl, platform:r.platform||'Facebook Ads' }; }
 function rowToHistory(r){ return { id:r.id, action:r.action, entity:r.entity, entityId:r.entity_id, description:r.description, byUser:r.by_user, byName:r.by_name, at:r.created_at }; }
-function rowToNote(r){ return { id:r.id, title:r.title, type:r.type||'freeform', content:r.content||{}, updatedAt:r.updated_at, createdAt:r.created_at }; }
-function rowToRestockOrder(r){ return { id:r.id, name:r.name, orderDate:r.order_date, status:r.status||'planning', shippingRatePerCbm:r.shipping_rate_per_cbm||0, shippingCostOverride:r.shipping_cost_override, items:r.items||[], notes:r.notes||'', updatedAt:r.updated_at, createdAt:r.created_at }; }
+function rowToOrgTaskDef(r){ return { id:r.id, label:r.label, type:r.type||'checkbox', sortOrder:r.sort_order||0, active:r.active!==false, isLeadsMetric:r.is_leads_metric||false }; }
+function rowToOrgReport(r){ return { id:r.id, employeeId:r.employee_id, reportDate:r.report_date, answers:r.answers||{}, createdAt:r.created_at, updatedAt:r.updated_at }; }
+function rowToOrgLead(r){ return { id:r.id, employeeId:r.employee_id, platform:r.platform, name:r.name, city:r.city||'', phone:r.phone||'', status:r.status||'not_shipped', createdAt:r.created_at }; }
+function rowToOrgReview(r){ return { id:r.id, employeeId:r.employee_id, clientName:r.client_name, productId:r.product_id, productName:r.product_name||'', reviewText:r.review_text||'', createdAt:r.created_at }; }
+function rowToOrgPipelineItem(r){ return { id:r.id, description:r.description, postLink:r.post_link||'', adCopy:r.ad_copy||'', assignedTo:r.assigned_to, status:r.status||'pending', createdAt:r.created_at, postedAt:r.posted_at }; }
 
 // ─── APP → DB format converters ───
 function taskToRow(t){ return { product_id:t.productId||null, test_product_id:t.testProductId||null, task_date:t.taskDate, day:t.day, assigned_mb:t.assignedMB, assigned_ve:t.assignedVE, campaign_type:t.campaignType, video_type:t.videoType, voice_over:t.voiceOver, angle:t.angle, variants:t.variants||[], status:t.status, revision_note:t.revisionNote||'', mb_note:t.mbNote||'', manager_approval:t.managerApproval||'pending', deadline_date:t.deadlineDate||null, is_test:t.isTest||false, test_product_name:t.testProductName||'', test_market:t.testMarket||'' }; }
@@ -353,8 +356,11 @@ async function loadAllData(){
     repsResult,
     { data: histData },
     { data: optionsData },
-    { data: notesData },
-    { data: restockData },
+    { data: orgTaskDefsData },
+    { data: orgReportsData },
+    { data: orgLeadsData },
+    { data: orgReviewsData },
+    { data: orgPipelineData },
   ] = await Promise.all([
     sb.from('users').select('*').order('id').limit(5000),
     fetchAllPaged('products', q=>q.select('*').order('id')),
@@ -363,8 +369,11 @@ async function loadAllData(){
     fetchAllPaged('reports', q=>q.select('*').order('id')),
     sb.from('history').select('*').order('created_at',{ascending:false}).limit(200),
     sb.from('custom_options').select('*'),
-    sb.from('notes').select('*').order('updated_at',{ascending:false}),
-    sb.from('restock_orders').select('*').order('created_at',{ascending:false}),
+    sb.from('organic_task_defs').select('*').order('sort_order'),
+    sb.from('organic_daily_reports').select('*').order('report_date',{ascending:false}).limit(5000),
+    sb.from('organic_leads').select('*').order('created_at',{ascending:false}).limit(5000),
+    sb.from('organic_reviews').select('*').order('created_at',{ascending:false}).limit(5000),
+    sb.from('organic_content_pipeline').select('*').order('created_at',{ascending:false}).limit(2000),
   ]);
   const prodsData = prodsResult.data;
   const tpData = tpResult.data;
@@ -372,8 +381,11 @@ async function loadAllData(){
 
   setLoad(85,'Processing…');
 
-  if(notesData) APP.notes = notesData.map(rowToNote);
-  if(restockData) APP.restockOrders = restockData.map(rowToRestockOrder);
+  if(orgTaskDefsData) APP.orgTaskDefs = orgTaskDefsData.map(rowToOrgTaskDef);
+  if(orgReportsData) APP.orgReports = orgReportsData.map(rowToOrgReport);
+  if(orgLeadsData) APP.orgLeads = orgLeadsData.map(rowToOrgLead);
+  if(orgReviewsData) APP.orgReviews = orgReviewsData.map(rowToOrgReview);
+  if(orgPipelineData) APP.orgPipeline = orgPipelineData.map(rowToOrgPipelineItem);
 
   if(optionsData){
     optionsData.forEach(row=>{
@@ -546,8 +558,12 @@ let APP = {
   tpFilter: { from:'', to:'', status:'', market:'' },
   prodFilter: { status:'', priority:'' },
   prodStatsFilter: { from:'', to:'' },
-  notes: [],
-  restockOrders: [],
+  orgTaskDefs: [],
+  orgReports: [],
+  orgLeads: [],
+  orgReviews: [],
+  orgPipeline: [],
+  orgReportFilter: { mode:'week', from:'', to:'' },
 };
 
 // ══════════════════════════════════════════════════════════
@@ -932,7 +948,7 @@ async function login(){
   if(!f){ renderAuth('Invalid email or password.'); return; }
   APP.me=f.id; APP.authed=true;
   saveSession(f.id);
-  APP.page = f.role==='product_lister' ? 'products' : 'dashboard';
+  APP.page = f.role==='product_lister' ? 'products' : f.role==='organic' ? 'orgreport' : 'dashboard';
   APP.dashUser=f.role==='admin'?(Object.values(APP.users).find(x=>x.role==='video_editor')?.id||null):null;
   document.getElementById('auth').style.display='none';
   document.getElementById('app').style.display='flex';
@@ -1045,8 +1061,10 @@ function render(){
     ${ni('stats','◳','Statistics')}
     ${ni('history','☰','History')}
     ${ni('team','◎','Team & Users')}
-    ${ni('notes','📝','Notes')}
-    ${ni('restocking','📦','Restocking')}
+    ${ni('orgreport','📱','Organic Report')}
+    ${ni('organicleads','🎯','Organic Leads')}
+    ${ni('organicreviews','⭐','Reviews')}
+    ${ni('organicpipeline','🗂️','Content Pipeline')}
   ` : me.role==='video_editor' ? `
     ${ni('dashboard','◧','Dashboard')}
     ${ni('tasks','▤','My Tasks',rev)}
@@ -1056,6 +1074,11 @@ function render(){
   ` : me.role==='product_lister' ? `
     ${ni('products','▣','Products')}
     ${ni('testproducts','⬡','Products to Test')}
+  ` : me.role==='organic' ? `
+    ${ni('orgreport','📱','Daily Report')}
+    ${ni('organicleads','🎯','Leads')}
+    ${ni('organicreviews','⭐','Reviews')}
+    ${ni('organicpipeline','🗂️','Content Pipeline')}
   ` : `
     ${ni('dashboard','◧','Dashboard')}
     ${ni('tasks','▤','Tasks',mbPend)}
@@ -1065,7 +1088,7 @@ function render(){
     ${ni('stats','◳','Statistics')}
   `;
 
-  const titles={dashboard:'Dashboard',tasks:'Weekly Tasks',pointage:'Pointage — Upload Tracking',reports:'Daily Reports',products:'Products',testproducts:'Products to Test',stats:'Statistics',history:'History',team:'Team & Users',notes:'Notes',restocking:'Restocking'};
+  const titles={dashboard:'Dashboard',tasks:'Weekly Tasks',pointage:'Pointage — Upload Tracking',reports:'Daily Reports',products:'Products',testproducts:'Products to Test',stats:'Statistics',history:'History',team:'Team & Users',orgreport:'Organic Content — Daily Report',organicleads:'Organic Content — Leads',organicreviews:'Organic Content — Reviews',organicpipeline:'Organic Content — Pipeline'};
   const subs={
     dashboard: me.role==='admin'?'Select a team member to view their KPIs':'Your performance overview',
     tasks:`Current week · ${wkT().length} tasks`,
@@ -1075,8 +1098,10 @@ function render(){
     testproducts: me.role==='admin'?`${APP.testProducts.length} products in testing`:'Products assigned for testing',
     stats: 'Global team performance — filter by KPI and date',
     history: `${APP.history.length} actions logged`,
-    notes: `${APP.notes.length} note${APP.notes.length!==1?'s':''} — freeform pages or tables`,
-    restocking: `${APP.restockOrders.length} restock order${APP.restockOrders.length!==1?'s':''}`,
+    orgreport: me.role==='admin'?'Task consistency & daily leads across the team':'Check off today\'s tasks',
+    organicleads: me.role==='admin'?'All leads collected from organic content':'Log a new lead you collected',
+    organicreviews: me.role==='admin'?'All reviews collected':'Log a new customer review',
+    organicpipeline: me.role==='admin'?'Manage content requests & concepts':'Content to post',
     team:`${Object.values(APP.users).length} users`,
   };
 
@@ -1112,8 +1137,10 @@ function renderPage(){
     case 'stats': return pgStats();
     case 'history': return pgHistory();
     case 'team':      return pgTeam();
-    case 'notes':     return pgNotes();
-    case 'restocking': return pgRestocking();
+    case 'orgreport': return pgOrganicReport();
+    case 'organicleads': return pgOrganicLeads();
+    case 'organicreviews': return pgOrganicReviews();
+    case 'organicpipeline': return pgOrganicPipeline();
     default:          return pgDash();
   }
 }
@@ -1126,6 +1153,7 @@ function pgDash(){
   if(me.role==='admin') return dashAdmin();
   if(me.role==='video_editor') return dashVE(APP.me);
   if(me.role==='product_lister') return `<div class="empty"><div class="empty-i">▣</div><div class="empty-t">Use the Products or Products to Test menu to manage your catalog.</div></div>`;
+  if(me.role==='organic') return pgOrganicReport();
   return dashMB(APP.me);
 }
 
@@ -1419,25 +1447,40 @@ function pgReports(){
   const isMB=me.role==='media_buyer';
   const mbs = isMB ? [me] : Object.values(APP.users).filter(x=>x.role==='media_buyer');
   const monthKey = todayYMD().slice(0,7);
-  if(!APP.reportFilter || typeof APP.reportFilter==='string') APP.reportFilter = {from:'',to:''};
+  if(!APP.reportFilter || typeof APP.reportFilter==='string') APP.reportFilter = {from:'',to:'',productId:'',codOnly:false};
+  if(APP.reportFilter.productId===undefined) APP.reportFilter.productId='';
+  if(APP.reportFilter.codOnly===undefined) APP.reportFilter.codOnly=false;
   const rf=APP.reportFilter;
 
   const filterBar = `
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+    <div style="display:flex;align-items:flex-end;gap:12px;margin-bottom:18px;flex-wrap:wrap">
       <div style="flex:1;min-width:220px">
         <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.3px">Filter by date range</div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <input type="date" class="fi" style="width:auto;padding:6px 10px;font-size:12px" value="${rf.from}" onchange="APP.reportFilter.from=this.value;render()" title="From">
           <span style="color:var(--muted);font-size:12px">→</span>
           <input type="date" class="fi" style="width:auto;padding:6px 10px;font-size:12px" value="${rf.to}" onchange="APP.reportFilter.to=this.value;render()" title="To">
-          ${(rf.from||rf.to)?`<button class="btn btn-ghost btn-sm" onclick="APP.reportFilter={from:'',to:''};render()">Clear ✕</button>`:''}
-          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter={from:'${todayYMD()}',to:'${todayYMD()}'};render()">Today</button>
-          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter={from:'${yesterdayYMD()}',to:'${yesterdayYMD()}'};render()">Yesterday</button>
-          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter={from:'${weekStartOf(todayYMD())}',to:'${todayYMD()}'};render()">This week</button>
-          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter={from:'${monthKey}-01',to:'${todayYMD()}'};render()">This month</button>
+          ${(rf.from||rf.to)?`<button class="btn btn-ghost btn-sm" onclick="APP.reportFilter.from='';APP.reportFilter.to='';render()">Clear ✕</button>`:''}
+          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter.from='${todayYMD()}';APP.reportFilter.to='${todayYMD()}';render()">Today</button>
+          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter.from='${yesterdayYMD()}';APP.reportFilter.to='${yesterdayYMD()}';render()">Yesterday</button>
+          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter.from='${weekStartOf(todayYMD())}';APP.reportFilter.to='${todayYMD()}';render()">This week</button>
+          <button class="btn btn-ghost btn-sm" onclick="APP.reportFilter.from='${monthKey}-01';APP.reportFilter.to='${todayYMD()}';render()">This month</button>
         </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:flex-end">
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.3px">Product</div>
+        <select class="fi" style="width:auto;padding:6px 10px;font-size:12px" onchange="APP.reportFilter.productId=this.value;render()">
+          <option value="">All products</option>
+          ${APP.products.map(p=>`<option value="${p.id}" ${String(rf.productId)===String(p.id)?'selected':''}>${escHtml(p.name)}${p.isCod?' 🚚':''}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="display:flex;align-items:center;gap:7px;padding:8px 12px;border:1.5px solid ${rf.codOnly?'var(--accent)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;background:${rf.codOnly?'var(--accent-bg)':'#fff'}">
+          <input type="checkbox" ${rf.codOnly?'checked':''} onchange="APP.reportFilter.codOnly=this.checked;render()" style="width:14px;height:14px;cursor:pointer">
+          🚚 COD products only
+        </label>
+      </div>
+      <div style="display:flex;gap:8px;align-items:flex-end;margin-left:auto">
         <button class="btn btn-out btn-sm" onclick="exportReportsCSV(${isMB?`APP.reports.filter(r=>r.mbId==='${me.id}')`:'null'})">⬇ Export Excel</button>
         ${isMB?`<button class="btn btn-pri btn-sm" onclick="openReportModal()">+ Add Daily Report</button>`:''}
       </div>
@@ -1447,13 +1490,15 @@ function pgReports(){
     let reps = APP.reports.filter(r=>r.mbId===mb.id).sort((a,b)=>b.date.localeCompare(a.date));
     if(rf.from) reps = reps.filter(r=>r.date>=rf.from);
     if(rf.to)   reps = reps.filter(r=>r.date<=rf.to);
+    if(rf.productId) reps = reps.filter(r=>String(r.productId)===String(rf.productId));
+    if(rf.codOnly) reps = reps.filter(r=>pr(r.productId)?.isCod);
 
     const monthReps = APP.reports.filter(r=>r.mbId===mb.id&&r.date.startsWith(monthKey));
     const mSpend = monthReps.reduce((s,r)=>s+r.spend,0);
     const mLeads = monthReps.reduce((s,r)=>s+r.leads,0);
     const mCpl = mLeads ? +(mSpend/mLeads).toFixed(2) : 0;
 
-    const filterLabel = (rf.from||rf.to) ? ` — ${rf.from?fmtDate(rf.from):'…'} to ${rf.to?fmtDate(rf.to):'…'}` : ' — All time';
+    const filterLabel = (rf.from||rf.to||rf.productId||rf.codOnly) ? ` — filtered` : ' — All time';
 
     return `<div class="card" style="margin-bottom:18px">
       <div class="card-h">
@@ -2263,348 +2308,418 @@ function pgHistory(){
 // TEAM & USERS  (full CRUD)
 // ══════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════
-// NOTES — freeform pages or tables, admin brainstorming space
+// ORGANIC CONTENT — daily task report, leads, reviews, pipeline
 // ══════════════════════════════════════════════════════════
-function pgNotes(){
-  const notes=APP.notes;
-  return `
-  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
-    <button class="btn btn-pri btn-sm" onclick="openNoteCreateModal()">+ New Note</button>
-  </div>
-  <div class="pgrid">
-    ${notes.length===0?`<div class="empty" style="grid-column:1/-1"><div class="empty-i">📝</div><div class="empty-t">No notes yet — jot down ideas, plans, or anything you want to track</div></div>`:''}
-    ${notes.map(n=>{
-      const preview = n.type==='table' ? `Table · ${(n.content?.rows||[]).length} rows × ${(n.content?.headers||[]).length} cols` : (n.content?.text||'(empty page)').slice(0,90);
-      return `<div class="pcard" onclick="openNoteDetail(${n.id})" style="cursor:pointer">
-        <div class="pcard-b">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:6px">
-            <div class="pcard-n">${escHtml(n.title)}</div>
-            ${n.type==='table'?chip('📊 Table','n'):chip('📄 Page','n')}
-          </div>
-          <div style="font-size:12px;color:var(--sub);line-height:1.5;min-height:36px">${escHtml(preview)}${n.type==='freeform'&&(n.content?.text||'').length>90?'…':''}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:8px">Updated ${fmtDate(n.updatedAt)}</div>
-        </div>
-      </div>`;
-    }).join('')}
-  </div>`;
+function orgPlatformIcon(p){
+  const icons={youtube:'▶️',whatsapp:'💬',instagram:'📷',facebook:'📘',tiktok:'🎵'};
+  return icons[p]||'📱';
 }
 
-function openNoteCreateModal(){
-  document.getElementById('md2').innerHTML=`
-  <div class="mh"><div><div class="mt">New Note</div><div class="ms">Choose a title and format</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
-  <div class="mb">
-    <div class="fg"><label class="fl">Title <span class="rq">*</span></label><input class="fi" id="note_new_title" placeholder="e.g. Q4 supplier ideas"></div>
-    <div class="fg"><label class="fl">Format</label>
-      <div style="display:flex;gap:10px;margin-top:6px">
-        <button class="btn btn-out" style="flex:1;padding:18px;font-size:13px" onclick="createNote('freeform')">📄<br><br>Freeform Page</button>
-        <button class="btn btn-out" style="flex:1;padding:18px;font-size:13px" onclick="createNote('table')">📊<br><br>Table</button>
-      </div>
-    </div>
-  </div>`;
-  openM2();
-}
-
-async function createNote(type){
-  const title=document.getElementById('note_new_title')?.value?.trim();
-  if(!title){ alert('Please enter a title.'); return; }
-  const content = type==='table' ? {headers:['Column 1','Column 2'], rows:[['','']]} : {text:''};
-  const {data,error} = await sb.from('notes').insert([{title,type,content}]).select().single();
-  if(error){ alert('Could not create note: '+error.message); return; }
-  if(data){ const n=rowToNote(data); APP.notes.unshift(n); closeM2(); openNoteDetail(n.id); }
-}
-
-let _noteTableBuf = { headers:[], rows:[] };
-
-function noteTableGridHTML(){
-  const headers=_noteTableBuf.headers, rows=_noteTableBuf.rows;
-  let html = '<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%">';
-  html += '<tr>';
-  headers.forEach((h,ci)=>{
-    html += '<th style="border:1px solid var(--border);padding:4px;background:var(--s50)">'
-      + '<div style="display:flex;gap:4px;align-items:center">'
-      + '<input class="fi" style="padding:5px 7px;font-size:12px" value="'+escHtml(h)+'" oninput="updateNoteHeader('+ci+',this.value)">'
-      + '<button class="btn btn-ghost btn-xs" onclick="removeNoteCol('+ci+')" type="button">✕</button>'
-      + '</div></th>';
+// ── Task definitions manager (admin) ──
+let _orgTaskDefBuf = [];
+function orgTaskDefsHTML(){
+  let html='';
+  _orgTaskDefBuf.forEach((t,i)=>{
+    if(t._deleted) return;
+    html += '<div style="display:flex;gap:8px;align-items:center;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;flex-wrap:wrap">'
+      + '<input class="fi" style="flex:1;min-width:180px" value="'+escHtml(t.label)+'" oninput="updateOrgTaskDef('+i+',\'label\',this.value)" placeholder="Task label">'
+      + '<select class="fi" style="width:auto" onchange="updateOrgTaskDef('+i+',\'type\',this.value)">'
+      + '<option value="checkbox" '+(t.type==='checkbox'?'selected':'')+'>Yes/No</option>'
+      + '<option value="number" '+(t.type==='number'?'selected':'')+'>Number</option>'
+      + '</select>'
+      + '<label style="display:flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap;cursor:pointer"><input type="radio" name="org_leads_metric" '+(t.isLeadsMetric?'checked':'')+' onclick="setOrgLeadsMetric('+i+')"> Leads metric</label>'
+      + '<label style="display:flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap;cursor:pointer"><input type="checkbox" '+(t.active?'checked':'')+' onchange="updateOrgTaskDef('+i+',\'active\',this.checked)"> Active</label>'
+      + '<button class="btn btn-ghost btn-xs" onclick="removeOrgTaskDefRow('+i+')" type="button">✕</button>'
+      + '</div>';
   });
-  html += '<th style="border:1px solid var(--border);padding:4px;width:40px"><button class="btn btn-ghost btn-xs" onclick="addNoteCol()" type="button">+</button></th></tr>';
-  rows.forEach((row,ri)=>{
-    html += '<tr>';
-    row.forEach((cell,ci)=>{
-      html += '<td style="border:1px solid var(--border);padding:2px">'
-        + '<input class="fi" style="border:none;padding:6px 7px;font-size:12px" value="'+escHtml(cell)+'" oninput="updateNoteCell('+ri+','+ci+',this.value)">'
-        + '</td>';
-    });
-    html += '<td style="border:1px solid var(--border);text-align:center"><button class="btn btn-ghost btn-xs" onclick="removeNoteRow('+ri+')" type="button">✕</button></td></tr>';
-  });
-  html += '</table></div><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addNoteRow()" type="button">+ Add row</button>';
-  return html;
+  return html || '<div style="font-size:12px;color:var(--muted);padding:10px 0">No tasks yet — add one below.</div>';
 }
-function updateNoteHeader(ci,val){ _noteTableBuf.headers[ci]=val; }
-function updateNoteCell(ri,ci,val){ _noteTableBuf.rows[ri][ci]=val; }
-function addNoteRow(){ _noteTableBuf.rows.push(_noteTableBuf.headers.map(()=>'')); document.getElementById('noteTableWrap').innerHTML=noteTableGridHTML(); }
-function removeNoteRow(ri){ _noteTableBuf.rows.splice(ri,1); document.getElementById('noteTableWrap').innerHTML=noteTableGridHTML(); }
-function addNoteCol(){ _noteTableBuf.headers.push('Column '+(_noteTableBuf.headers.length+1)); _noteTableBuf.rows.forEach(r=>r.push('')); document.getElementById('noteTableWrap').innerHTML=noteTableGridHTML(); }
-function removeNoteCol(ci){ _noteTableBuf.headers.splice(ci,1); _noteTableBuf.rows.forEach(r=>r.splice(ci,1)); document.getElementById('noteTableWrap').innerHTML=noteTableGridHTML(); }
+function updateOrgTaskDef(i,field,val){ _orgTaskDefBuf[i][field]=val; }
+function setOrgLeadsMetric(i){ _orgTaskDefBuf.forEach((t,idx)=>t.isLeadsMetric=(idx===i)); document.getElementById('orgTaskDefsWrap').innerHTML=orgTaskDefsHTML(); }
+function addOrgTaskDefRow(){ _orgTaskDefBuf.push({id:null,label:'',type:'checkbox',active:true,isLeadsMetric:false,_deleted:false}); document.getElementById('orgTaskDefsWrap').innerHTML=orgTaskDefsHTML(); }
+function removeOrgTaskDefRow(i){ if(_orgTaskDefBuf[i].id){ _orgTaskDefBuf[i]._deleted=true; } else { _orgTaskDefBuf.splice(i,1); } document.getElementById('orgTaskDefsWrap').innerHTML=orgTaskDefsHTML(); }
 
-function openNoteDetail(id){
-  const n=APP.notes.find(x=>x.id===id);
-  if(!n){ alert('Note not found — try refreshing.'); return; }
-  let bodyHtml;
-  if(n.type==='table'){
-    _noteTableBuf = { headers:[...(n.content?.headers||['Column 1'])], rows:(n.content?.rows||[['']]).map(r=>[...r]) };
-    bodyHtml = '<div id="noteTableWrap">'+noteTableGridHTML()+'</div>';
-  } else {
-    bodyHtml = '<textarea class="fi" id="note_text" rows="18" style="width:100%;font-family:inherit;resize:vertical">'+escHtml(n.content?.text||'')+'</textarea>';
+function openOrgTaskDefsModal(){
+  _orgTaskDefBuf = APP.orgTaskDefs.map(t=>({id:t.id,label:t.label,type:t.type,active:t.active,isLeadsMetric:t.isLeadsMetric,_deleted:false}));
+  if(!_orgTaskDefBuf.length){
+    _orgTaskDefBuf = [
+      {id:null,label:"5 Story's Posted on Instagram & Facebook",type:'checkbox',active:true,isLeadsMetric:false,_deleted:false},
+      {id:null,label:'5 videos posted on YouTube, Instagram, Facebook, TikTok',type:'checkbox',active:true,isLeadsMetric:false,_deleted:false},
+      {id:null,label:'Number of leads Collected',type:'number',active:true,isLeadsMetric:true,_deleted:false},
+      {id:null,label:'Did you reply to comments and messages in different socials',type:'checkbox',active:true,isLeadsMetric:false,_deleted:false},
+    ];
   }
   document.getElementById('md2').innerHTML=`
-  <div class="mh">
-    <div style="flex:1;min-width:0"><input class="fi" id="note_title" value="${escHtml(n.title)}" style="font-size:15px;font-weight:700"></div>
-    <div style="display:flex;gap:8px;flex-shrink:0">
-      <button class="btn btn-bad btn-sm" onclick="deleteNote(${n.id})">Delete</button>
-      <button class="btn btn-out btn-sm" onclick="closeM2()">✕</button>
-    </div>
-  </div>
-  <div class="mb">${bodyHtml}</div>
-  <div class="mf"><button class="btn btn-out" onclick="closeM2()">Cancel</button><button class="btn btn-pri" onclick="saveNote(${n.id})">Save</button></div>`;
-  openM2();
-}
-
-async function saveNote(id){
-  const n=APP.notes.find(x=>x.id===id);
-  if(!n) return;
-  const title=document.getElementById('note_title')?.value?.trim()||n.title;
-  const content = n.type==='table'
-    ? { headers:[..._noteTableBuf.headers], rows:_noteTableBuf.rows.map(r=>[...r]) }
-    : { text: document.getElementById('note_text')?.value||'' };
-  const {data,error} = await sb.from('notes').update({title,content,updated_at:new Date().toISOString()}).eq('id',id).select();
-  if(error){ alert('Save failed: '+error.message); return; }
-  if(!data||data.length===0){ alert('Warning: note not found in database — not saved. Please refresh and try again.'); return; }
-  n.title=title; n.content=content; n.updatedAt=new Date().toISOString();
-  closeM2(); render();
-}
-
-async function deleteNote(id){
-  if(!confirm('Delete this note permanently?')) return;
-  const {error}=await sb.from('notes').delete().eq('id',id);
-  if(error){ alert('Delete failed: '+error.message); return; }
-  APP.notes=APP.notes.filter(n=>n.id!==id);
-  closeM2(); render();
-}
-
-// ══════════════════════════════════════════════════════════
-// RESTOCKING — restock orders with product/quantity selection,
-// supplier price, CBM, and a live shipment budget simulator
-// ══════════════════════════════════════════════════════════
-function calcRestockTotals(order){
-  const items=order.items||[];
-  const totalUnits=items.reduce((s,it)=>s+(parseFloat(it.quantity)||0),0);
-  const totalPurchase=items.reduce((s,it)=>s+((parseFloat(it.quantity)||0)*(parseFloat(it.supplierPrice)||0)),0);
-  const totalCbm=items.reduce((s,it)=>s+((parseFloat(it.quantity)||0)*(parseFloat(it.cbmPerUnit)||0)),0);
-  const hasOverride = order.shippingCostOverride!==null && order.shippingCostOverride!==undefined && order.shippingCostOverride!=='';
-  const shippingCost = hasOverride ? parseFloat(order.shippingCostOverride) : totalCbm*(parseFloat(order.shippingRatePerCbm)||0);
-  const grandTotal = totalPurchase + (isNaN(shippingCost)?0:shippingCost);
-  return { totalUnits, totalPurchase, totalCbm, shippingCost: isNaN(shippingCost)?0:shippingCost, grandTotal };
-}
-
-function pgRestocking(){
-  const orders=APP.restockOrders;
-  const statusStyle={planning:'n',ordered:'w',shipped:'a',received:'ok'};
-  const statusLabel={planning:'📝 Planning',ordered:'📦 Ordered',shipped:'🚢 Shipped',received:'✓ Received'};
-  return `
-  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
-    <button class="btn btn-pri btn-sm" onclick="openRestockForm()">+ New Restock Order</button>
-  </div>
-  <div class="pgrid">
-    ${orders.length===0?`<div class="empty" style="grid-column:1/-1"><div class="empty-i">📦</div><div class="empty-t">No restock orders yet</div></div>`:''}
-    ${orders.map(o=>{
-      const t=calcRestockTotals(o);
-      return `<div class="pcard" onclick="openRestockForm(${o.id})" style="cursor:pointer">
-        <div class="pcard-b">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:6px">
-            <div class="pcard-n">${escHtml(o.name)}</div>
-            ${chip(statusLabel[o.status]||o.status, statusStyle[o.status]||'n')}
-          </div>
-          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${o.orderDate?fmtDate(o.orderDate):'No date set'} · ${(o.items||[]).length} product${(o.items||[]).length!==1?'s':''} · ${t.totalUnits} units</div>
-          <div style="font-size:10px;color:var(--muted);margin-bottom:8px">Purchase: <b style="color:var(--ink)">$${t.totalPurchase.toFixed(2)}</b> · Shipping: <b style="color:var(--ink)">$${t.shippingCost.toFixed(2)}</b></div>
-          <div style="padding-top:8px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase">Grand total</span>
-            <span style="font-size:18px;font-weight:800;color:var(--accent)">$${t.grandTotal.toFixed(2)}</span>
-          </div>
-        </div>
-      </div>`;
-    }).join('')}
-  </div>`;
-}
-
-let _restockBuf = { items: [] };
-
-function restockProductOptionsHTML(selectedType, selectedId){
-  let html='<option value="">— Select product —</option><optgroup label="Catalog Products">';
-  APP.products.forEach(p=>{
-    const sel=(selectedType==='catalog'&&String(selectedId)===String(p.id))?'selected':'';
-    html+='<option value="catalog:'+p.id+'" '+sel+'>'+escHtml(p.name)+' ('+p.market+')</option>';
-  });
-  html+='</optgroup><optgroup label="Test Products">';
-  APP.testProducts.forEach(p=>{
-    const sel=(selectedType==='test'&&String(selectedId)===String(p.id))?'selected':'';
-    html+='<option value="test:'+p.id+'" '+sel+'>'+escHtml(p.name)+' ('+p.market+') 🧪</option>';
-  });
-  html+='</optgroup>';
-  return html;
-}
-
-function restockItemsTableHTML(){
-  let html='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
-    +'<thead><tr>'
-    +'<th style="text-align:left;padding:6px;font-size:10px;color:var(--muted);text-transform:uppercase">Product</th>'
-    +'<th style="text-align:left;padding:6px;font-size:10px;color:var(--muted);text-transform:uppercase;width:90px">Qty</th>'
-    +'<th style="text-align:left;padding:6px;font-size:10px;color:var(--muted);text-transform:uppercase;width:120px">Supplier price</th>'
-    +'<th style="text-align:left;padding:6px;font-size:10px;color:var(--muted);text-transform:uppercase;width:110px">CBM / unit</th>'
-    +'<th style="text-align:right;padding:6px;font-size:10px;color:var(--muted);text-transform:uppercase;width:100px">Line total</th>'
-    +'<th style="width:34px"></th></tr></thead><tbody>';
-  _restockBuf.items.forEach((it,i)=>{
-    const lineTotal=(parseFloat(it.quantity)||0)*(parseFloat(it.supplierPrice)||0);
-    html+='<tr style="border-top:1px solid var(--border)">'
-      +'<td style="padding:5px"><select class="fi" style="padding:6px 8px;font-size:12px" onchange="updateRestockItemProduct('+i+',this.value)">'+restockProductOptionsHTML(it.productType,it.productId)+'</select></td>'
-      +'<td style="padding:5px"><input class="fi" type="number" min="0" style="padding:6px 8px;font-size:12px" value="'+(it.quantity||'')+'" oninput="updateRestockItemField('+i+',\'quantity\',this.value)"></td>'
-      +'<td style="padding:5px"><input class="fi" type="number" min="0" step="0.01" style="padding:6px 8px;font-size:12px" value="'+(it.supplierPrice||'')+'" oninput="updateRestockItemField('+i+',\'supplierPrice\',this.value)"></td>'
-      +'<td style="padding:5px"><input class="fi" type="number" min="0" step="0.001" style="padding:6px 8px;font-size:12px" value="'+(it.cbmPerUnit||'')+'" oninput="updateRestockItemField('+i+',\'cbmPerUnit\',this.value)"></td>'
-      +'<td style="padding:5px;text-align:right;font-weight:700;font-size:12px">$'+lineTotal.toFixed(2)+'</td>'
-      +'<td style="padding:5px;text-align:center"><button class="btn btn-ghost btn-xs" onclick="removeRestockItem('+i+')" type="button">✕</button></td></tr>';
-  });
-  html+='</tbody></table></div>';
-  return html;
-}
-
-function restockSummaryHTML(){
-  const shipRate=parseFloat(document.getElementById('rk_shiprate')?.value)||0;
-  const shipOverrideRaw=document.getElementById('rk_shipoverride')?.value;
-  const totalUnits=_restockBuf.items.reduce((s,it)=>s+(parseFloat(it.quantity)||0),0);
-  const totalPurchase=_restockBuf.items.reduce((s,it)=>s+((parseFloat(it.quantity)||0)*(parseFloat(it.supplierPrice)||0)),0);
-  const totalCbm=_restockBuf.items.reduce((s,it)=>s+((parseFloat(it.quantity)||0)*(parseFloat(it.cbmPerUnit)||0)),0);
-  const shippingCost=(shipOverrideRaw!==undefined&&shipOverrideRaw!=='')?parseFloat(shipOverrideRaw):totalCbm*shipRate;
-  const safeShip=isNaN(shippingCost)?0:shippingCost;
-  const grandTotal=totalPurchase+safeShip;
-  return '<div class="g3">'
-    +'<div class="stat"><div class="stat-v">'+totalUnits+'</div><div class="stat-l">Total units</div></div>'
-    +'<div class="stat"><div class="stat-v">'+totalCbm.toFixed(3)+'</div><div class="stat-l">Total CBM</div></div>'
-    +'<div class="stat"><div class="stat-v">$'+totalPurchase.toFixed(2)+'</div><div class="stat-l">Purchase cost</div></div>'
-    +'</div>'
-    +'<div style="margin-top:12px;padding:14px;background:var(--accent-bg);border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">'
-    +'<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase">Shipping cost</div><div style="font-size:15px;font-weight:700">$'+safeShip.toFixed(2)+'</div></div>'
-    +'<div style="text-align:right"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase">Grand total budget</div><div style="font-size:24px;font-weight:800;color:var(--accent)">$'+grandTotal.toFixed(2)+'</div></div>'
-    +'</div>';
-}
-
-function refreshRestockCalc(){
-  const itemsWrap=document.getElementById('restockItemsWrap');
-  if(itemsWrap) itemsWrap.innerHTML=restockItemsTableHTML();
-  const summaryWrap=document.getElementById('restockSummaryWrap');
-  if(summaryWrap) summaryWrap.innerHTML=restockSummaryHTML();
-}
-function updateRestockItemField(i,field,val){ _restockBuf.items[i][field]=val; refreshRestockCalc(); }
-function updateRestockItemProduct(i,val){
-  if(!val){ _restockBuf.items[i].productType=null; _restockBuf.items[i].productId=null; _restockBuf.items[i].productName=''; refreshRestockCalc(); return; }
-  const [type,idStr]=val.split(':');
-  const idNum=parseInt(idStr);
-  const prod=type==='catalog'?pr(idNum):APP.testProducts.find(p=>p.id===idNum);
-  _restockBuf.items[i].productType=type;
-  _restockBuf.items[i].productId=idNum;
-  _restockBuf.items[i].productName=prod?prod.name:'';
-  refreshRestockCalc();
-}
-function addRestockItem(){ _restockBuf.items.push({productType:null,productId:null,productName:'',quantity:'',supplierPrice:'',cbmPerUnit:''}); refreshRestockCalc(); }
-function removeRestockItem(i){ _restockBuf.items.splice(i,1); refreshRestockCalc(); }
-
-function openRestockForm(id=null){
-  const isEdit=id!==null;
-  const order=isEdit?APP.restockOrders.find(o=>o.id===id):null;
-  if(isEdit&&!order){ alert('Order not found — try refreshing.'); return; }
-  _restockBuf = { items: isEdit ? (order.items||[]).map(it=>({...it})) : [{productType:null,productId:null,productName:'',quantity:'',supplierPrice:'',cbmPerUnit:''}] };
-
-  document.getElementById('md2').innerHTML=`
-  <div class="mh"><div><div class="mt">${isEdit?'Edit Restock Order':'New Restock Order'}</div><div class="ms">Select products, quantities & supplier prices — budget calculates automatically</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
+  <div class="mh"><div><div class="mt">Manage Daily Tasks</div><div class="ms">These are the tasks your organic content employee checks off every day</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
   <div class="mb">
-    <div style="display:flex;gap:12px;flex-wrap:wrap">
-      <div class="fg" style="flex:2;min-width:200px"><label class="fl">Order name <span class="rq">*</span></label><input class="fi" id="rk_name" value="${isEdit?escHtml(order.name):''}" placeholder="e.g. August restock — China supplier"></div>
-      <div class="fg" style="flex:1;min-width:140px"><label class="fl">Date</label><input class="fi" id="rk_date" type="date" value="${isEdit&&order.orderDate?order.orderDate:todayYMD()}"></div>
-    </div>
-    <div class="fg">
-      <label class="fl">Status</label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${['planning','ordered','shipped','received'].map(s=>`<button class="upill ${(isEdit?order.status:'planning')===s?'on':''}" id="rks_${s}" type="button" onclick="setRestockStatus('${s}')">${s==='planning'?'📝 Planning':s==='ordered'?'📦 Ordered':s==='shipped'?'🚢 Shipped':'✓ Received'}</button>`).join('')}
-      </div>
-      <input type="hidden" id="rk_status" value="${isEdit?order.status:'planning'}">
-    </div>
-    <div class="divider"></div>
-    <div class="sec-t">Products in this restock</div>
-    <div id="restockItemsWrap">${restockItemsTableHTML()}</div>
-    <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addRestockItem()" type="button">+ Add product line</button>
-    <div class="divider"></div>
-    <div class="sec-t">Shipping</div>
-    <div style="display:flex;gap:12px;flex-wrap:wrap">
-      <div class="fg" style="flex:1;min-width:160px"><label class="fl">Shipping rate ($ per CBM)</label><input class="fi" id="rk_shiprate" type="number" min="0" step="0.01" value="${isEdit?(order.shippingRatePerCbm||''):''}" placeholder="0.00" oninput="refreshRestockCalc()"></div>
-      <div class="fg" style="flex:1;min-width:160px"><label class="fl">Or fixed shipping cost <span style="font-weight:400;color:var(--muted)">(overrides rate)</span></label><input class="fi" id="rk_shipoverride" type="number" min="0" step="0.01" value="${isEdit&&order.shippingCostOverride!=null?order.shippingCostOverride:''}" placeholder="Leave empty to use rate" oninput="refreshRestockCalc()"></div>
-    </div>
-    <div class="divider"></div>
-    <div class="sec-t">Budget simulator</div>
-    <div id="restockSummaryWrap">${restockSummaryHTML()}</div>
-    <div class="divider"></div>
-    <div class="fg"><label class="fl">Notes</label><textarea class="fi" id="rk_notes" rows="2" placeholder="Supplier contact, tracking number, anything useful...">${isEdit?escHtml(order.notes||''):''}</textarea></div>
+    <div id="orgTaskDefsWrap">${orgTaskDefsHTML()}</div>
+    <button class="btn btn-ghost btn-sm" onclick="addOrgTaskDefRow()" type="button">+ Add task</button>
+    <div class="al al-i" style="margin-top:14px"><i>💡</i><div>Mark exactly one <b>Number</b> task as "Leads metric" — that's the one the dashboard totals up as leads collected.</div></div>
   </div>
-  <div class="mf">
-    ${isEdit?`<button class="btn btn-bad btn-sm" onclick="deleteRestockOrder(${id})" style="margin-right:auto">Delete</button>`:''}
-    <button class="btn btn-out" onclick="closeM2()">Cancel</button>
-    <button class="btn btn-pri" onclick="saveRestockOrder(${isEdit?id:'null'})">${isEdit?'Save':'Create order'}</button>
-  </div>`;
+  <div class="mf"><button class="btn btn-out" onclick="closeM2()">Cancel</button><button class="btn btn-pri" onclick="saveOrgTaskDefs()">Save tasks</button></div>`;
   openM2();
 }
-function setRestockStatus(s){
-  ['planning','ordered','shipped','received'].forEach(st=>{
-    const el=document.getElementById('rks_'+st);
-    if(el) el.classList.toggle('on', st===s);
-  });
-  document.getElementById('rk_status').value=s;
+
+async function saveOrgTaskDefs(){
+  for(const t of _orgTaskDefBuf){ if(!t._deleted && !t.label.trim()){ alert('Every task needs a label.'); return; } }
+  let sortOrder=0;
+  for(const t of _orgTaskDefBuf){
+    if(t._deleted){
+      if(t.id){ const {error}=await sb.from('organic_task_defs').delete().eq('id',t.id); if(error){ alert('Delete failed: '+error.message); return; } }
+      continue;
+    }
+    const row={ label:t.label.trim(), type:t.type, active:!!t.active, is_leads_metric:!!t.isLeadsMetric, sort_order:sortOrder };
+    if(t.id){
+      const {error}=await sb.from('organic_task_defs').update(row).eq('id',t.id);
+      if(error){ alert('Save failed: '+error.message); return; }
+    } else {
+      const {error}=await sb.from('organic_task_defs').insert([row]);
+      if(error){ alert('Save failed: '+error.message); return; }
+    }
+    sortOrder++;
+  }
+  const {data}=await sb.from('organic_task_defs').select('*').order('sort_order');
+  if(data) APP.orgTaskDefs = data.map(rowToOrgTaskDef);
+  closeM2(); render();
 }
 
-async function saveRestockOrder(id){
-  const isNew = id==='null'||id===null;
-  const name=document.getElementById('rk_name')?.value?.trim();
-  const date=document.getElementById('rk_date')?.value||null;
-  const status=document.getElementById('rk_status')?.value||'planning';
-  const shipRate=parseFloat(document.getElementById('rk_shiprate')?.value)||0;
-  const shipOverrideRaw=document.getElementById('rk_shipoverride')?.value;
-  const shipOverride=(shipOverrideRaw!==undefined&&shipOverrideRaw!=='')?parseFloat(shipOverrideRaw):null;
-  const notes=document.getElementById('rk_notes')?.value?.trim()||'';
-  if(!name){ alert('Please enter an order name.'); return; }
-  const items=_restockBuf.items.filter(it=>it.productId);
-  if(!items.length){ alert('Add at least one product to this restock order.'); return; }
+// ── Daily report page ──
+function pgOrganicReport(){
+  const me=u();
+  return me.role==='admin' ? pgOrganicReportAdmin() : pgOrganicReportEmployee();
+}
 
-  const row={ name, order_date:date, status, shipping_rate_per_cbm:shipRate, shipping_cost_override:shipOverride, items, notes };
+function pgOrganicReportEmployee(){
+  const me=u();
+  const activeTasks = APP.orgTaskDefs.filter(t=>t.active).sort((a,b)=>a.sortOrder-b.sortOrder);
+  const today=todayYMD();
+  const existing = APP.orgReports.find(r=>r.employeeId===me.id && r.reportDate===today);
+  const answers = existing?.answers||{};
 
-  if(isNew){
-    const {data,error}=await sb.from('restock_orders').insert([row]).select().single();
-    if(error){ alert('Could not save: '+error.message); return; }
-    if(data) APP.restockOrders.unshift(rowToRestockOrder(data));
-    await logHistory('created','restock',data?.id||0,`Created restock order "${name}" — ${items.length} product(s)`);
-  } else {
-    const numId=parseInt(id)||id;
-    const {data,error}=await sb.from('restock_orders').update(row).eq('id',numId).select();
+  if(!activeTasks.length){
+    return `<div class="empty"><div class="empty-i">📱</div><div class="empty-t">No tasks configured yet — ask your admin to set up the daily task list.</div></div>`;
+  }
+
+  const formHtml = activeTasks.map(t=>{
+    const val=answers[t.id];
+    if(t.type==='number'){
+      return `<div class="fg"><label class="fl">${escHtml(t.label)}</label><input class="fi" type="number" min="0" id="orgtask_${t.id}" value="${val!==undefined?val:''}" placeholder="0"></div>`;
+    }
+    const checked=val===true;
+    return `<label style="display:flex;align-items:center;gap:10px;padding:12px 14px;border:1.5px solid ${checked?'var(--ok-bd)':'var(--border)'};border-radius:9px;cursor:pointer;margin-bottom:8px;background:${checked?'var(--ok-bg)':'#fff'}">
+      <input type="checkbox" id="orgtask_${t.id}" ${checked?'checked':''} style="width:18px;height:18px;cursor:pointer" onchange="this.parentElement.style.borderColor=this.checked?'var(--ok-bd)':'var(--border)';this.parentElement.style.background=this.checked?'var(--ok-bg)':'#fff'">
+      <span style="font-size:13px;font-weight:600">${escHtml(t.label)}</span>
+    </label>`;
+  }).join('');
+
+  const history = APP.orgReports.filter(r=>r.employeeId===me.id).sort((a,b)=>b.reportDate.localeCompare(a.reportDate)).slice(0,14);
+
+  return `
+  <div class="al al-i"><i>📱</i><div>Check off what you completed today. You can update this anytime.</div></div>
+  <div class="card" style="margin-bottom:20px"><div class="card-b" style="padding:18px">
+    <div style="font-size:13px;font-weight:700;margin-bottom:12px">Today — ${fmtDate(today)}</div>
+    ${formHtml}
+    <button class="btn btn-pri btn-sm" style="margin-top:8px" onclick="saveOrgReport()">${existing?"Update today's report":"Save today's report"}</button>
+  </div></div>
+  <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px">Recent history</div>
+  <div class="tw"><table>
+    <thead><tr><th>Date</th>${activeTasks.map(t=>`<th>${escHtml(t.label.slice(0,22))}${t.label.length>22?'…':''}</th>`).join('')}</tr></thead>
+    <tbody>
+    ${history.length?history.map(r=>`<tr><td>${fmtDate(r.reportDate)}</td>${activeTasks.map(t=>{
+      const v=r.answers[t.id];
+      if(t.type==='number') return `<td>${v!==undefined?v:'—'}</td>`;
+      return `<td>${v===true?'✓':v===false?'✗':'—'}</td>`;
+    }).join('')}</tr>`).join(''):`<tr><td colspan="${activeTasks.length+1}"><div class="empty" style="padding:20px"><div class="empty-t" style="font-size:12px">No reports yet</div></div></td></tr>`}
+    </tbody>
+  </table></div>`;
+}
+
+async function saveOrgReport(){
+  const me=u();
+  const activeTasks=APP.orgTaskDefs.filter(t=>t.active);
+  const today=todayYMD();
+  const answers={};
+  activeTasks.forEach(t=>{
+    const el=document.getElementById('orgtask_'+t.id);
+    if(!el) return;
+    answers[t.id] = t.type==='number' ? (parseFloat(el.value)||0) : el.checked;
+  });
+  const existing=APP.orgReports.find(r=>r.employeeId===me.id && r.reportDate===today);
+  if(existing){
+    const {data,error}=await sb.from('organic_daily_reports').update({answers,updated_at:new Date().toISOString()}).eq('id',existing.id).select();
     if(error){ alert('Save failed: '+error.message); return; }
-    if(!data||data.length===0){ alert('Warning: order not found in database — not saved. Please refresh and try again.'); return; }
-    const o=APP.restockOrders.find(x=>x.id===numId);
-    if(o) Object.assign(o,{name,orderDate:date,status,shippingRatePerCbm:shipRate,shippingCostOverride:shipOverride,items,notes});
-    await logHistory('updated','restock',numId,`Edited restock order "${name}"`);
+    if(!data||data.length===0){ alert('Warning: report not found in database — not saved. Refresh and try again.'); return; }
+    existing.answers=answers;
+  } else {
+    const {data,error}=await sb.from('organic_daily_reports').insert([{employee_id:me.id, report_date:today, answers}]).select().single();
+    if(error){ alert('Could not save: '+error.message); return; }
+    if(data) APP.orgReports.unshift(rowToOrgReport(data));
   }
-  closeM2(); render();
+  render();
 }
 
-async function deleteRestockOrder(id){
-  if(!confirm('Delete this restock order permanently?')) return;
-  const {error}=await sb.from('restock_orders').delete().eq('id',id);
+function pgOrganicReportAdmin(){
+  const employees=Object.values(APP.users).filter(x=>x.role==='organic');
+  const activeTasks=APP.orgTaskDefs.filter(t=>t.active).sort((a,b)=>a.sortOrder-b.sortOrder);
+  const leadsTask=APP.orgTaskDefs.find(t=>t.isLeadsMetric);
+  if(!APP.orgReportFilter) APP.orgReportFilter={mode:'week',from:'',to:''};
+  const f=APP.orgReportFilter;
+
+  let rangeFrom,rangeTo;
+  if(f.mode==='week'){ rangeFrom=weekStartOf(todayYMD()); rangeTo=todayYMD(); }
+  else if(f.mode==='month'){ rangeFrom=todayYMD().slice(0,7)+'-01'; rangeTo=todayYMD(); }
+  else { rangeFrom=f.from; rangeTo=f.to; }
+
+  const filterBar=`
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:18px;flex-wrap:wrap">
+    <button class="btn btn-sm ${f.mode==='week'?'btn-pri':'btn-out'}" onclick="APP.orgReportFilter.mode='week';render()">This week</button>
+    <button class="btn btn-sm ${f.mode==='month'?'btn-pri':'btn-out'}" onclick="APP.orgReportFilter.mode='month';render()">This month</button>
+    <button class="btn btn-sm ${f.mode==='custom'?'btn-pri':'btn-out'}" onclick="APP.orgReportFilter.mode='custom';render()">Custom</button>
+    ${f.mode==='custom'?`<input type="date" class="fi" style="width:auto;padding:6px 10px;font-size:12px" value="${f.from}" onchange="APP.orgReportFilter.from=this.value;render()"><span style="color:var(--muted);font-size:12px">→</span><input type="date" class="fi" style="width:auto;padding:6px 10px;font-size:12px" value="${f.to}" onchange="APP.orgReportFilter.to=this.value;render()">`:''}
+    <button class="btn btn-out btn-sm" style="margin-left:auto" onclick="openOrgTaskDefsModal()">⚙ Manage Tasks</button>
+  </div>`;
+
+  if(!employees.length){
+    return filterBar+`<div class="empty"><div class="empty-i">📱</div><div class="empty-t">No organic content employees yet — add one from Team & Users with the "organic" role.</div></div>`;
+  }
+
+  const daysInRange=(rangeFrom&&rangeTo)?(Math.floor((new Date(rangeTo)-new Date(rangeFrom))/86400000)+1):null;
+  let totalLeadsAll=0;
+  const rows=employees.map(emp=>{
+    let reps=APP.orgReports.filter(r=>r.employeeId===emp.id);
+    if(rangeFrom) reps=reps.filter(r=>r.reportDate>=rangeFrom);
+    if(rangeTo)   reps=reps.filter(r=>r.reportDate<=rangeTo);
+    const submittedDays=reps.length;
+    const consistency=daysInRange?Math.round((submittedDays/daysInRange)*100):null;
+    let leadsTotal=0;
+    if(leadsTask) leadsTotal=reps.reduce((s,r)=>s+(parseFloat(r.answers[leadsTask.id])||0),0);
+    totalLeadsAll+=leadsTotal;
+    const checkboxTasks=activeTasks.filter(t=>t.type==='checkbox');
+    let doneCount=0,totalCount=0;
+    reps.forEach(r=>{ checkboxTasks.forEach(t=>{ totalCount++; if(r.answers[t.id]===true) doneCount++; }); });
+    const completionRate=totalCount?Math.round((doneCount/totalCount)*100):null;
+    return { emp, submittedDays, consistency, leadsTotal, completionRate };
+  });
+
+  return filterBar+`
+  <div class="kpis" style="margin-bottom:20px">
+    <div class="kpi"><div class="kpi-l">Total leads collected</div><div class="kpi-v">${totalLeadsAll}</div><div class="kpi-s">${leadsTask?'From "'+escHtml(leadsTask.label)+'"':'No leads metric task set'}</div></div>
+    <div class="kpi"><div class="kpi-l">Employees tracked</div><div class="kpi-v">${employees.length}</div></div>
+    <div class="kpi"><div class="kpi-l">Days in range</div><div class="kpi-v">${daysInRange||'—'}</div></div>
+  </div>
+  <div class="tw"><table>
+    <thead><tr><th>Employee</th><th>Days reported</th><th>Consistency</th><th>Task completion</th><th>Leads collected</th></tr></thead>
+    <tbody>
+    ${rows.map(r=>`<tr>
+      <td><div style="display:flex;align-items:center;gap:9px">${av(r.emp.id,28)}<b>${r.emp.name}</b></div></td>
+      <td>${r.submittedDays}${daysInRange?' / '+daysInRange:''}</td>
+      <td>${r.consistency!==null?`<span class="${r.consistency>=80?'ontime':r.consistency>=50?'':'late'}">${r.consistency}%</span>`:'—'}</td>
+      <td>${r.completionRate!==null?r.completionRate+'%':'—'}</td>
+      <td><b>${r.leadsTotal}</b></td>
+    </tr>`).join('')}
+    </tbody>
+  </table></div>`;
+}
+
+// ── Leads page ──
+function pgOrganicLeads(){
+  const me=u();
+  const isAdmin=me.role==='admin';
+  const leads=isAdmin?APP.orgLeads:APP.orgLeads.filter(l=>l.employeeId===me.id);
+  const statusStyle={not_shipped:'w',shipped:'a',delivered:'ok'};
+  const statusLabel={not_shipped:'Not shipped',shipped:'Shipped',delivered:'Delivered'};
+
+  return `
+  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+    ${!isAdmin?`<button class="btn btn-pri btn-sm" onclick="openOrgLeadForm()">+ Add Lead</button>`:''}
+  </div>
+  <div class="tw"><table>
+    <thead><tr>${isAdmin?'<th>Employee</th>':''}<th>Date</th><th>Platform</th><th>Name</th><th>City</th><th>Phone</th><th>Status</th></tr></thead>
+    <tbody>
+    ${leads.length===0?`<tr><td colspan="${isAdmin?7:6}"><div class="empty" style="padding:24px"><div class="empty-i">🎯</div><div class="empty-t">No leads logged yet</div></div></td></tr>`:''}
+    ${leads.slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(l=>`<tr>
+      ${isAdmin?`<td>${av(l.employeeId,22)} ${APP.users[l.employeeId]?.name||l.employeeId}</td>`:''}
+      <td>${fmtDate((l.createdAt||'').slice(0,10))}</td>
+      <td>${orgPlatformIcon(l.platform)} ${l.platform}</td>
+      <td><b>${escHtml(l.name)}</b></td>
+      <td>${escHtml(l.city)}</td>
+      <td>${escHtml(l.phone)}</td>
+      <td>${isAdmin?`<select class="fi" style="padding:5px 8px;font-size:11px;width:auto" onchange="updateOrgLeadStatus(${l.id},this.value)">${['not_shipped','shipped','delivered'].map(s=>`<option value="${s}" ${l.status===s?'selected':''}>${statusLabel[s]}</option>`).join('')}</select>`:chip(statusLabel[l.status]||l.status,statusStyle[l.status]||'n')}</td>
+    </tr>`).join('')}
+    </tbody>
+  </table></div>`;
+}
+
+function openOrgLeadForm(){
+  document.getElementById('md1').innerHTML=`
+  <div class="mh"><div><div class="mt">Add Lead</div><div class="ms">Log a new lead you collected from organic content</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
+  <div class="mb">
+    <div class="fg"><label class="fl">Platform <span class="rq">*</span></label>
+      <select class="fi" id="ol_platform">${['youtube','whatsapp','instagram','facebook','tiktok'].map(p=>`<option value="${p}">${orgPlatformIcon(p)} ${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}</select>
+    </div>
+    <div class="fg"><label class="fl">Name <span class="rq">*</span></label><input class="fi" id="ol_name" placeholder="Client name"></div>
+    <div style="display:flex;gap:12px">
+      <div class="fg" style="flex:1"><label class="fl">City</label><input class="fi" id="ol_city" placeholder="City"></div>
+      <div class="fg" style="flex:1"><label class="fl">Phone number</label><input class="fi" id="ol_phone" placeholder="+212..."></div>
+    </div>
+  </div>
+  <div class="mf"><button class="btn btn-out" onclick="closeM1()">Cancel</button><button class="btn btn-pri" onclick="saveOrgLead()">Save Lead</button></div>`;
+  openM1();
+}
+
+async function saveOrgLead(){
+  const me=u();
+  const platform=document.getElementById('ol_platform')?.value;
+  const name=document.getElementById('ol_name')?.value?.trim();
+  const city=document.getElementById('ol_city')?.value?.trim()||'';
+  const phone=document.getElementById('ol_phone')?.value?.trim()||'';
+  if(!platform||!name){ alert('Platform and name are required.'); return; }
+  const {data,error}=await sb.from('organic_leads').insert([{employee_id:me.id,platform,name,city,phone,status:'not_shipped'}]).select().single();
+  if(error){ alert('Could not save: '+error.message); return; }
+  if(data) APP.orgLeads.unshift(rowToOrgLead(data));
+  await logHistory('created','organic_lead',data?.id||0,`${me.name} logged a lead: ${name} (${platform})`);
+  closeM1(); render();
+}
+
+async function updateOrgLeadStatus(id,status){
+  const {data,error}=await sb.from('organic_leads').update({status}).eq('id',id).select();
+  if(error){ alert('Save failed: '+error.message); return; }
+  if(!data||data.length===0){ alert('Warning: lead not found — not saved.'); return; }
+  const l=APP.orgLeads.find(x=>x.id===id);
+  if(l) l.status=status;
+  render();
+}
+
+// ── Reviews page ──
+function pgOrganicReviews(){
+  const me=u();
+  const isAdmin=me.role==='admin';
+  const reviews=isAdmin?APP.orgReviews:APP.orgReviews.filter(r=>r.employeeId===me.id);
+
+  return `
+  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+    ${!isAdmin?`<button class="btn btn-pri btn-sm" onclick="openOrgReviewForm()">+ Add Review</button>`:''}
+  </div>
+  <div class="pgrid">
+  ${reviews.length===0?`<div class="empty" style="grid-column:1/-1"><div class="empty-i">⭐</div><div class="empty-t">No reviews collected yet</div></div>`:''}
+  ${reviews.slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(r=>`
+    <div class="pcard">
+      <div class="pcard-b">
+        ${isAdmin?`<div style="font-size:10px;color:var(--muted);margin-bottom:6px">${av(r.employeeId,18)} ${APP.users[r.employeeId]?.name||r.employeeId}</div>`:''}
+        <div class="pcard-n" style="margin-bottom:4px">${escHtml(r.clientName)}</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">${escHtml(r.productName)}</div>
+        <div style="font-size:12px;color:var(--sub);line-height:1.5;padding:10px;background:var(--s50);border-radius:8px">"${escHtml(r.reviewText)}"</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:8px">${fmtDate((r.createdAt||'').slice(0,10))}</div>
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function openOrgReviewForm(){
+  document.getElementById('md1').innerHTML=`
+  <div class="mh"><div><div class="mt">Add Review</div><div class="ms">Log a review collected from a customer</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
+  <div class="mb">
+    <div class="fg"><label class="fl">Client name <span class="rq">*</span></label><input class="fi" id="orv_name" placeholder="Client name"></div>
+    <div class="fg"><label class="fl">Product ordered</label>
+      <select class="fi" id="orv_product"><option value="">— None / not sure —</option>${APP.products.map(p=>`<option value="${p.id}">${escHtml(p.name)}</option>`).join('')}</select>
+    </div>
+    <div class="fg"><label class="fl">Review given <span class="rq">*</span></label><textarea class="fi" id="orv_text" rows="4" placeholder="What did the client say..."></textarea></div>
+  </div>
+  <div class="mf"><button class="btn btn-out" onclick="closeM1()">Cancel</button><button class="btn btn-pri" onclick="saveOrgReview()">Save Review</button></div>`;
+  openM1();
+}
+
+async function saveOrgReview(){
+  const me=u();
+  const clientName=document.getElementById('orv_name')?.value?.trim();
+  const productId=document.getElementById('orv_product')?.value;
+  const reviewText=document.getElementById('orv_text')?.value?.trim();
+  if(!clientName||!reviewText){ alert('Client name and review text are required.'); return; }
+  const productName=productId?(pr(parseInt(productId))?.name||''):'';
+  const {data,error}=await sb.from('organic_reviews').insert([{employee_id:me.id,client_name:clientName,product_id:productId?parseInt(productId):null,product_name:productName,review_text:reviewText}]).select().single();
+  if(error){ alert('Could not save: '+error.message); return; }
+  if(data) APP.orgReviews.unshift(rowToOrgReview(data));
+  await logHistory('created','organic_review',data?.id||0,`${me.name} logged a review from ${clientName}`);
+  closeM1(); render();
+}
+
+// ── Content pipeline page ──
+function pgOrganicPipeline(){
+  const me=u();
+  const isAdmin=me.role==='admin';
+  const items=isAdmin?APP.orgPipeline:APP.orgPipeline.filter(p=>p.assignedTo===me.id);
+  const statusStyle={pending:'w',posted:'ok'};
+
+  return `
+  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+    ${isAdmin?`<button class="btn btn-pri btn-sm" onclick="openOrgPipelineForm()">+ New Content Item</button>`:''}
+  </div>
+  <div class="pgrid">
+  ${items.length===0?`<div class="empty" style="grid-column:1/-1"><div class="empty-i">🗂️</div><div class="empty-t">No content items yet</div></div>`:''}
+  ${items.slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(it=>`
+    <div class="pcard">
+      <div class="pcard-b">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:8px">
+          <div style="font-size:10px;color:var(--muted)">${isAdmin?(APP.users[it.assignedTo]?.name||'Unassigned'):''}</div>
+          ${chip(it.status==='posted'?'✓ Posted':'⏳ Pending',statusStyle[it.status]||'n')}
+        </div>
+        <div style="font-size:13px;color:var(--ink);line-height:1.5;margin-bottom:10px">${escHtml(it.description)}</div>
+        ${it.postLink?`<a href="${it.postLink}" target="_blank" style="font-size:11px;color:var(--accent);display:block;margin-bottom:6px">🔗 Open link</a>`:''}
+        ${it.adCopy?`<div style="font-size:11px;color:var(--sub);padding:8px;background:var(--s50);border-radius:7px;margin-bottom:8px">${escHtml(it.adCopy)}</div>`:''}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+          <div style="font-size:10px;color:var(--muted)">${fmtDate((it.createdAt||'').slice(0,10))}</div>
+          ${(!isAdmin&&it.status==='pending')?`<button class="btn btn-pri btn-xs" onclick="markOrgPipelinePosted(${it.id})">Mark Posted</button>`:''}
+          ${isAdmin?`<button class="btn btn-ghost btn-xs" onclick="deleteOrgPipelineItem(${it.id})">Delete</button>`:''}
+        </div>
+      </div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function openOrgPipelineForm(){
+  const employees=Object.values(APP.users).filter(x=>x.role==='organic');
+  document.getElementById('md1').innerHTML=`
+  <div class="mh"><div><div class="mt">New Content Item</div><div class="ms">A post request, concept, or piece of content to publish</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
+  <div class="mb">
+    <div class="fg"><label class="fl">Description / concept <span class="rq">*</span></label><textarea class="fi" id="op_desc" rows="3" placeholder="e.g. Post a screenshot of a WhatsApp review — blur the client's number"></textarea></div>
+    <div class="fg"><label class="fl">Post link <span style="font-weight:400;color:var(--muted)">(optional — if content is ready)</span></label><input class="fi" id="op_link" placeholder="https://drive.google.com/..."></div>
+    <div class="fg"><label class="fl">Ad copy / caption <span style="font-weight:400;color:var(--muted)">(optional)</span></label><textarea class="fi" id="op_adcopy" rows="3" placeholder="Caption text to use..."></textarea></div>
+    <div class="fg"><label class="fl">Assign to</label>
+      <select class="fi" id="op_assignee"><option value="">— Unassigned —</option>${employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}</select>
+    </div>
+  </div>
+  <div class="mf"><button class="btn btn-out" onclick="closeM1()">Cancel</button><button class="btn btn-pri" onclick="saveOrgPipelineItem()">Create</button></div>`;
+  openM1();
+}
+
+async function saveOrgPipelineItem(){
+  const description=document.getElementById('op_desc')?.value?.trim();
+  const postLink=document.getElementById('op_link')?.value?.trim()||'';
+  const adCopy=document.getElementById('op_adcopy')?.value?.trim()||'';
+  const assignedTo=document.getElementById('op_assignee')?.value||null;
+  if(!description){ alert('Please enter a description.'); return; }
+  const {data,error}=await sb.from('organic_content_pipeline').insert([{description,post_link:postLink,ad_copy:adCopy,assigned_to:assignedTo,status:'pending'}]).select().single();
+  if(error){ alert('Could not save: '+error.message); return; }
+  if(data) APP.orgPipeline.unshift(rowToOrgPipelineItem(data));
+  await logHistory('created','organic_pipeline',data?.id||0,`Created content item: ${description.slice(0,50)}`);
+  closeM1(); render();
+}
+
+async function markOrgPipelinePosted(id){
+  const {data,error}=await sb.from('organic_content_pipeline').update({status:'posted',posted_at:new Date().toISOString()}).eq('id',id).select();
+  if(error){ alert('Save failed: '+error.message); return; }
+  if(!data||data.length===0){ alert('Warning: item not found — not saved.'); return; }
+  const it=APP.orgPipeline.find(x=>x.id===id);
+  if(it){ it.status='posted'; it.postedAt=new Date().toISOString(); }
+  render();
+}
+
+async function deleteOrgPipelineItem(id){
+  if(!confirm('Delete this content item?')) return;
+  const {error}=await sb.from('organic_content_pipeline').delete().eq('id',id);
   if(error){ alert('Delete failed: '+error.message); return; }
-  APP.restockOrders=APP.restockOrders.filter(o=>o.id!==id);
-  closeM2(); render();
+  APP.orgPipeline=APP.orgPipeline.filter(x=>x.id!==id);
+  render();
 }
 
 function pgTeam(){
@@ -3405,7 +3520,7 @@ function openUserModal(uid=null){
   const isEdit=uid!==null;
   const x=isEdit?APP.users[uid]:null;
   const ves=Object.values(APP.users).filter(v=>v.role==='video_editor');
-  const allPerms=['dashboard','tasks','products','team','reports','pointage','testproducts','stats','history'];
+  const allPerms=['dashboard','tasks','products','team','reports','pointage','testproducts','stats','history','orgreport','organicleads','organicreviews','organicpipeline'];
   document.getElementById('md2').innerHTML=`
   <div class="mh"><div><div class="mt">${isEdit?'Edit user — '+x.name:'Add user'}</div><div class="ms">${isEdit?x.email:'Create a new account'}</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
   <div class="mb">
@@ -3417,7 +3532,7 @@ function openUserModal(uid=null){
     <div class="fg"><label class="fl">Password ${isEdit?'<span style="font-weight:400;color:var(--muted)">(blank = unchanged)</span>':'<span class="rq">*</span>'}</label><input class="fi" id="u_pwd" type="password" placeholder="${isEdit?'New password...':'Minimum 6 characters'}"></div>
     <div class="fg"><label class="fl">Role <span class="rq">*</span></label>
       <select class="fi" id="u_role" onchange="userRoleChange()">
-        ${['video_editor','media_buyer','product_lister','admin'].map(r=>`<option value="${r}" ${isEdit&&x.role===r?'selected':''}>${r.replace('_',' ')}</option>`).join('')}
+        ${['video_editor','media_buyer','product_lister','organic','admin'].map(r=>`<option value="${r}" ${isEdit&&x.role===r?'selected':''}>${r.replace('_',' ')}</option>`).join('')}
       </select>
     </div>
     <div id="u_mbExtra" style="display:${(isEdit?x.role:'video_editor')==='media_buyer'?'block':'none'}">
@@ -3434,8 +3549,8 @@ function openUserModal(uid=null){
     <div class="divider"></div>
     <div class="sec-t">Access permissions</div>
     ${allPerms.map(perm=>{
-      const permLabels={dashboard:'View dashboard & KPIs',tasks:'Access tasks',products:'View & manage products',team:'Manage users & assignments',reports:'Daily spend reports',pointage:'Upload tracking',testproducts:'Products to test',stats:'Statistics',history:'Audit history'};
-      const defaultOn = {video_editor:['dashboard','tasks','products','testproducts'], media_buyer:['dashboard','tasks','products','reports','testproducts'], product_lister:['products','testproducts'], admin:allPerms};
+      const permLabels={dashboard:'View dashboard & KPIs',tasks:'Access tasks',products:'View & manage products',team:'Manage users & assignments',reports:'Daily spend reports',pointage:'Upload tracking',testproducts:'Products to test',stats:'Statistics',history:'Audit history',orgreport:'Organic daily report',organicleads:'Organic leads tracking',organicreviews:'Reviews collected',organicpipeline:'Content pipeline'};
+      const defaultOn = {video_editor:['dashboard','tasks','products','testproducts'], media_buyer:['dashboard','tasks','products','reports','testproducts'], product_lister:['products','testproducts'], organic:['orgreport','organicleads','organicreviews','organicpipeline'], admin:allPerms};
       const role = isEdit ? x.role : 'video_editor';
       const on = isEdit ? (x.perms?.[perm]?1:0) : (defaultOn[role]||['products']).includes(perm)?1:0;
       return `<div class="prow"><div><div style="font-size:13px;font-weight:600;text-transform:capitalize">${perm.replace('_',' ')}</div><div style="font-size:11px;color:var(--muted)">${permLabels[perm]||perm}</div></div><button class="tog ${on?'on':''}" id="perm_${perm}" onclick="this.classList.toggle('on')" type="button"></button></div>`;
@@ -3448,8 +3563,8 @@ function userRoleChange(){
   const r=document.getElementById('u_role').value;
   document.getElementById('u_mbExtra').style.display=r==='media_buyer'?'block':'none';
   // Auto-set default permissions for the chosen role
-  const allPerms=['dashboard','tasks','products','team','reports','pointage','testproducts','stats','history'];
-  const defaults={video_editor:['dashboard','tasks','products','testproducts'], media_buyer:['dashboard','tasks','products','reports','testproducts'], product_lister:['products','testproducts'], admin:allPerms};
+  const allPerms=['dashboard','tasks','products','team','reports','pointage','testproducts','stats','history','orgreport','organicleads','organicreviews','organicpipeline'];
+  const defaults={video_editor:['dashboard','tasks','products','testproducts'], media_buyer:['dashboard','tasks','products','reports','testproducts'], product_lister:['products','testproducts'], organic:['orgreport','organicleads','organicreviews','organicpipeline'], admin:allPerms};
   const on = defaults[r]||['products'];
   allPerms.forEach(p=>{
     const el=document.getElementById('perm_'+p);
@@ -3457,7 +3572,7 @@ function userRoleChange(){
   });
 }
 async function saveUser(uid){
-  const allPerms=['dashboard','tasks','products','team','reports','pointage','testproducts','stats','history'];
+  const allPerms=['dashboard','tasks','products','team','reports','pointage','testproducts','stats','history','orgreport','organicleads','organicreviews','organicpipeline'];
   const name=document.getElementById('u_name').value.trim();
   const email=document.getElementById('u_email').value.trim().toLowerCase();
   const pwd=document.getElementById('u_pwd').value;
@@ -4049,7 +4164,7 @@ document.getElementById('mo2').addEventListener('click',function(e){ if(e.target
     const f = APP.users[savedId];
     APP.me = savedId;
     APP.authed = true;
-    APP.page = f.role==='product_lister' ? 'products' : 'dashboard';
+    APP.page = f.role==='product_lister' ? 'products' : f.role==='organic' ? 'orgreport' : 'dashboard';
     APP.dashUser = f.role==='admin' ? (Object.values(APP.users).find(x=>x.role==='video_editor')?.id||null) : null;
     document.getElementById('auth').style.display='none';
     document.getElementById('app').style.display='flex';
