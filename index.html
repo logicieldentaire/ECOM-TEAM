@@ -315,7 +315,7 @@ function rowToReport(r){ return { id:r.id, mbId:r.mb_id, productId:r.product_id,
 function rowToHistory(r){ return { id:r.id, action:r.action, entity:r.entity, entityId:r.entity_id, description:r.description, byUser:r.by_user, byName:r.by_name, at:r.created_at }; }
 function rowToOrgTaskDef(r){ return { id:r.id, label:r.label, type:r.type||'checkbox', sortOrder:r.sort_order||0, active:r.active!==false, isLeadsMetric:r.is_leads_metric||false }; }
 function rowToOrgReport(r){ return { id:r.id, employeeId:r.employee_id, reportDate:r.report_date, answers:r.answers||{}, createdAt:r.created_at, updatedAt:r.updated_at }; }
-function rowToOrgLead(r){ return { id:r.id, employeeId:r.employee_id, entryDate:r.entry_date, platform:r.platform, name:r.name, city:r.city||'', phone:r.phone||'', status:r.status||'not_shipped', createdAt:r.created_at }; }
+function rowToOrgLead(r){ return { id:r.id, employeeId:r.employee_id, entryDate:r.entry_date, platform:r.platform, name:r.name, city:r.city||'', phone:r.phone||'', productId:r.product_id, productName:r.product_name||'', priceKsh:r.price_ksh, quantity:r.quantity||1, orderDescription:r.order_description||'', status:r.status||'not_shipped', createdAt:r.created_at }; }
 function rowToOrgReview(r){ return { id:r.id, employeeId:r.employee_id, entryDate:r.entry_date, clientName:r.client_name, productId:r.product_id, productName:r.product_name||'', reviewText:r.review_text||'', createdAt:r.created_at }; }
 function rowToOrgPipelineItem(r){ return { id:r.id, description:r.description, postLink:r.post_link||'', adCopy:r.ad_copy||'', assignedTo:r.assigned_to, status:r.status||'pending', createdAt:r.created_at, postedAt:r.posted_at }; }
 
@@ -2416,21 +2416,33 @@ function pgOrganicReportEmployee(){
   <div class="card" style="margin-bottom:20px"><div class="card-b" style="padding:18px">
     <div style="font-size:13px;font-weight:700;margin-bottom:12px">${isToday?'Today':fmtDate(selDate)}${isToday?'':''} — ${fmtDate(selDate)}</div>
     ${formHtml}
-    <button class="btn btn-pri btn-sm" style="margin-top:8px" onclick="saveOrgReport()">${existing?'Update this report':'Save this report'}</button>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-pri btn-sm" onclick="saveOrgReport()">${existing?'Update this report':'Save this report'}</button>
+      ${existing?`<button class="btn btn-bad btn-sm" onclick="deleteOrgReportEntry(${existing.id})">Delete this report</button>`:''}
+    </div>
   </div></div>
-  <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px">Recent history</div>
+  <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px">Recent history <span style="font-weight:400;text-transform:none;color:var(--muted)">— click a row to edit that day</span></div>
   <div class="tw"><table>
-    <thead><tr><th>Date</th>${activeTasks.map(t=>`<th>${escHtml(t.label.slice(0,22))}${t.label.length>22?'…':''}</th>`).join('')}</tr></thead>
+    <thead><tr><th>Date</th>${activeTasks.map(t=>`<th>${escHtml(t.label.slice(0,22))}${t.label.length>22?'…':''}</th>`).join('')}<th></th></tr></thead>
     <tbody>
-    ${history.length?history.map(r=>`<tr><td>${fmtDate(r.reportDate)}</td>${activeTasks.map(t=>{
+    ${history.length?history.map(r=>`<tr class="clickable" onclick="changeOrgReportDate('${r.reportDate}')" style="${r.reportDate===selDate?'background:var(--accent-bg)':''}"><td>${fmtDate(r.reportDate)}</td>${activeTasks.map(t=>{
       const v=r.answers[t.id];
       if(t.type==='number') return `<td>${v!==undefined?v:'—'}</td>`;
       return `<td>${v===true?'✓':v===false?'✗':'—'}</td>`;
-    }).join('')}</tr>`).join(''):`<tr><td colspan="${activeTasks.length+1}"><div class="empty" style="padding:20px"><div class="empty-t" style="font-size:12px">No reports yet</div></div></td></tr>`}
+    }).join('')}<td><button class="btn btn-ghost btn-xs" onclick="event.stopPropagation();deleteOrgReportEntry(${r.id})">✕</button></td></tr>`).join(''):`<tr><td colspan="${activeTasks.length+2}"><div class="empty" style="padding:20px"><div class="empty-t" style="font-size:12px">No reports yet</div></div></td></tr>`}
     </tbody>
   </table></div>`;
 }
 function changeOrgReportDate(val){ APP.orgReportSelectedDate = val; render(); }
+
+async function deleteOrgReportEntry(id){
+  if(!confirm('Delete this daily report entry permanently?')) return;
+  const {error}=await sb.from('organic_daily_reports').delete().eq('id',id);
+  if(error){ alert('Delete failed: '+error.message); return; }
+  APP.orgReports=APP.orgReports.filter(r=>r.id!==id);
+  APP.orgReportSelectedDate = todayYMD();
+  render();
+}
 
 async function saveOrgReport(){
   const me=u();
@@ -2496,17 +2508,23 @@ function pgOrganicReportAdmin(){
     let doneCount=0,totalCount=0;
     reps.forEach(r=>{ checkboxTasks.forEach(t=>{ totalCount++; if(r.answers[t.id]===true) doneCount++; }); });
     const completionRate=totalCount?Math.round((doneCount/totalCount)*100):null;
-    return { emp, submittedDays, consistency, leadsTotal, completionRate };
+    // Real leads actually logged in the Leads section (cross-check vs self-reported number)
+    let realLeads=APP.orgLeads.filter(l=>l.employeeId===emp.id);
+    if(rangeFrom) realLeads=realLeads.filter(l=>(l.entryDate||'')>=rangeFrom);
+    if(rangeTo)   realLeads=realLeads.filter(l=>(l.entryDate||'')<=rangeTo);
+    return { emp, submittedDays, consistency, leadsTotal, completionRate, realLeadsCount:realLeads.length };
   });
+  const totalRealLeadsAll = rows.reduce((s,r)=>s+r.realLeadsCount,0);
 
   return filterBar+`
   <div class="kpis" style="margin-bottom:20px">
-    <div class="kpi"><div class="kpi-l">Total leads collected</div><div class="kpi-v">${totalLeadsAll}</div><div class="kpi-s">${leadsTask?'From "'+escHtml(leadsTask.label)+'"':'No leads metric task set'}</div></div>
+    <div class="kpi"><div class="kpi-l">Total leads collected</div><div class="kpi-v">${totalLeadsAll}</div><div class="kpi-s">${leadsTask?'Self-reported via "'+escHtml(leadsTask.label)+'"':'No leads metric task set'}</div></div>
+    <div class="kpi"><div class="kpi-l">Real leads logged</div><div class="kpi-v">${totalRealLeadsAll}</div><div class="kpi-s">Actual entries in the Leads section</div></div>
     <div class="kpi"><div class="kpi-l">Employees tracked</div><div class="kpi-v">${employees.length}</div></div>
     <div class="kpi"><div class="kpi-l">Days in range</div><div class="kpi-v">${daysInRange||'—'}</div></div>
   </div>
   <div class="tw"><table>
-    <thead><tr><th>Employee</th><th>Days reported</th><th>Consistency</th><th>Task completion</th><th>Leads collected</th></tr></thead>
+    <thead><tr><th>Employee</th><th>Days reported</th><th>Consistency</th><th>Task completion</th><th>Leads collected (self-reported)</th><th>Leads logged (actual)</th></tr></thead>
     <tbody>
     ${rows.map(r=>`<tr>
       <td><div style="display:flex;align-items:center;gap:9px">${av(r.emp.id,28)}<b>${r.emp.name}</b></div></td>
@@ -2514,6 +2532,7 @@ function pgOrganicReportAdmin(){
       <td>${r.consistency!==null?`<span class="${r.consistency>=80?'ontime':r.consistency>=50?'':'late'}">${r.consistency}%</span>`:'—'}</td>
       <td>${r.completionRate!==null?r.completionRate+'%':'—'}</td>
       <td><b>${r.leadsTotal}</b></td>
+      <td><b>${r.realLeadsCount}</b></td>
     </tr>`).join('')}
     </tbody>
   </table></div>`;
@@ -2527,14 +2546,36 @@ function pgOrganicLeads(){
   const statusStyle={not_shipped:'w',shipped:'a',delivered:'ok'};
   const statusLabel={not_shipped:'Not shipped',shipped:'Shipped',delivered:'Delivered'};
 
+  const totalLeads=leads.length;
+  const totalValue=leads.reduce((s,l)=>s+((parseFloat(l.priceKsh)||0)*(parseInt(l.quantity)||1)),0);
+  const notShippedCount=leads.filter(l=>l.status==='not_shipped').length;
+  const shippedCount=leads.filter(l=>l.status==='shipped').length;
+  const deliveredCount=leads.filter(l=>l.status==='delivered').length;
+
+  const employeeBreakdown = isAdmin ? Object.values(APP.users).filter(u=>u.role==='organic').map(emp=>{
+    const empLeads=APP.orgLeads.filter(l=>l.employeeId===emp.id);
+    const empValue=empLeads.reduce((s,l)=>s+((parseFloat(l.priceKsh)||0)*(parseInt(l.quantity)||1)),0);
+    return { emp, count:empLeads.length, value:empValue };
+  }) : [];
+
   return `
+  <div class="kpis" style="margin-bottom:18px">
+    <div class="kpi"><div class="kpi-l">Total leads</div><div class="kpi-v">${totalLeads}</div></div>
+    <div class="kpi"><div class="kpi-l">Total order value</div><div class="kpi-v">${totalValue.toFixed(2)} KSH</div></div>
+    <div class="kpi"><div class="kpi-l">Not shipped</div><div class="kpi-v" style="color:var(--warn)">${notShippedCount}</div></div>
+    <div class="kpi"><div class="kpi-l">Shipped / Delivered</div><div class="kpi-v" style="color:var(--ok)">${shippedCount} / ${deliveredCount}</div></div>
+  </div>
+  ${isAdmin&&employeeBreakdown.length?`<div class="tw" style="margin-bottom:18px"><table>
+    <thead><tr><th>Employee</th><th>Leads</th><th>Order value</th></tr></thead>
+    <tbody>${employeeBreakdown.map(e=>`<tr><td><div style="display:flex;align-items:center;gap:9px">${av(e.emp.id,26)}<b>${e.emp.name}</b></div></td><td>${e.count}</td><td>${e.value.toFixed(2)} KSH</td></tr>`).join('')}</tbody>
+  </table></div>`:''}
   <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
-    ${!isAdmin?`<button class="btn btn-pri btn-sm" onclick="openOrgLeadForm()">+ Add Lead</button>`:''}
+    <button class="btn btn-pri btn-sm" onclick="openOrgLeadForm()">+ Add Lead</button>
   </div>
   <div class="tw"><table>
-    <thead><tr>${isAdmin?'<th>Employee</th>':''}<th>Date</th><th>Platform</th><th>Name</th><th>City</th><th>Phone</th><th>Status</th></tr></thead>
+    <thead><tr>${isAdmin?'<th>Employee</th>':''}<th>Date</th><th>Platform</th><th>Name</th><th>City</th><th>Phone</th><th>Product</th><th>Price (KSH)</th><th>Qty</th><th>Status</th><th></th></tr></thead>
     <tbody>
-    ${leads.length===0?`<tr><td colspan="${isAdmin?7:6}"><div class="empty" style="padding:24px"><div class="empty-i">🎯</div><div class="empty-t">No leads logged yet</div></div></td></tr>`:''}
+    ${leads.length===0?`<tr><td colspan="${isAdmin?11:10}"><div class="empty" style="padding:24px"><div class="empty-i">🎯</div><div class="empty-t">No leads logged yet</div></div></td></tr>`:''}
     ${leads.slice().sort((a,b)=>(b.entryDate||b.createdAt||'').localeCompare(a.entryDate||a.createdAt||'')).map(l=>`<tr>
       ${isAdmin?`<td>${av(l.employeeId,22)} ${APP.users[l.employeeId]?.name||l.employeeId}</td>`:''}
       <td>${fmtDate(l.entryDate||(l.createdAt||'').slice(0,10))}</td>
@@ -2542,42 +2583,93 @@ function pgOrganicLeads(){
       <td><b>${escHtml(l.name)}</b></td>
       <td>${escHtml(l.city)}</td>
       <td>${escHtml(l.phone)}</td>
+      <td>${escHtml(l.productName)||'<span style="color:var(--muted)">—</span>'}</td>
+      <td>${l.priceKsh!=null?l.priceKsh:'<span style="color:var(--muted)">—</span>'}</td>
+      <td>${l.quantity||1}</td>
       <td>${isAdmin?`<select class="fi" style="padding:5px 8px;font-size:11px;width:auto" onchange="updateOrgLeadStatus(${l.id},this.value)">${['not_shipped','shipped','delivered'].map(s=>`<option value="${s}" ${l.status===s?'selected':''}>${statusLabel[s]}</option>`).join('')}</select>`:chip(statusLabel[l.status]||l.status,statusStyle[l.status]||'n')}</td>
+      <td><button class="btn btn-ghost btn-xs" onclick="openOrgLeadForm(${l.id})">Edit</button></td>
     </tr>`).join('')}
     </tbody>
   </table></div>`;
 }
 
-function openOrgLeadForm(){
+function openOrgLeadForm(id=null){
+  const isEdit = id!==null;
+  const lead = isEdit ? APP.orgLeads.find(l=>l.id===id) : null;
+  if(isEdit && !lead){ alert('Lead not found — try refreshing.'); return; }
   document.getElementById('md1').innerHTML=`
-  <div class="mh"><div><div class="mt">Add Lead</div><div class="ms">Log a new lead you collected from organic content</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
+  <div class="mh"><div><div class="mt">${isEdit?'Edit Lead':'Add Lead'}</div><div class="ms">${isEdit?'Update the details of this lead':'Log a new lead you collected from organic content'}</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
   <div class="mb">
-    <div class="fg"><label class="fl">Date <span class="rq">*</span></label><input class="fi" type="date" id="ol_date" value="${todayYMD()}" max="${todayYMD()}"></div>
-    <div class="fg"><label class="fl">Platform <span class="rq">*</span></label>
-      <select class="fi" id="ol_platform">${['youtube','whatsapp','instagram','facebook','tiktok'].map(p=>`<option value="${p}">${orgPlatformIcon(p)} ${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}</select>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div class="fg" style="flex:1;min-width:140px"><label class="fl">Date <span class="rq">*</span></label><input class="fi" type="date" id="ol_date" value="${isEdit?lead.entryDate:todayYMD()}" max="${todayYMD()}"></div>
+      <div class="fg" style="flex:1;min-width:140px"><label class="fl">Platform <span class="rq">*</span></label>
+        <select class="fi" id="ol_platform">${['youtube','whatsapp','instagram','facebook','tiktok'].map(p=>`<option value="${p}" ${isEdit&&lead.platform===p?'selected':''}>${orgPlatformIcon(p)} ${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}</select>
+      </div>
     </div>
-    <div class="fg"><label class="fl">Name <span class="rq">*</span></label><input class="fi" id="ol_name" placeholder="Client name"></div>
+    <div class="fg"><label class="fl">Name <span class="rq">*</span></label><input class="fi" id="ol_name" value="${isEdit?escHtml(lead.name):''}" placeholder="Client name"></div>
     <div style="display:flex;gap:12px">
-      <div class="fg" style="flex:1"><label class="fl">City</label><input class="fi" id="ol_city" placeholder="City"></div>
-      <div class="fg" style="flex:1"><label class="fl">Phone number</label><input class="fi" id="ol_phone" placeholder="+212..."></div>
+      <div class="fg" style="flex:1"><label class="fl">City</label><input class="fi" id="ol_city" value="${isEdit?escHtml(lead.city):''}" placeholder="City"></div>
+      <div class="fg" style="flex:1"><label class="fl">Phone number</label><input class="fi" id="ol_phone" value="${isEdit?escHtml(lead.phone):''}" placeholder="+212..."></div>
     </div>
+    <div class="divider"></div>
+    <div class="fg"><label class="fl">Product ordered</label>
+      <select class="fi" id="ol_product"><option value="">— None / not sure —</option>${APP.products.map(p=>`<option value="${p.id}" ${isEdit&&String(lead.productId)===String(p.id)?'selected':''}>${escHtml(p.name)}</option>`).join('')}</select>
+    </div>
+    <div style="display:flex;gap:12px">
+      <div class="fg" style="flex:1"><label class="fl">Price (KSH)</label><input class="fi" type="number" min="0" step="0.01" id="ol_price" value="${isEdit&&lead.priceKsh!=null?lead.priceKsh:''}" placeholder="0.00"></div>
+      <div class="fg" style="flex:1"><label class="fl">Quantity ordered</label><input class="fi" type="number" min="1" id="ol_qty" value="${isEdit?lead.quantity||1:1}" placeholder="1"></div>
+    </div>
+    <div class="fg"><label class="fl">Order description <span style="font-weight:400;color:var(--muted)">(bundle, extra details...)</span></label><textarea class="fi" id="ol_desc" rows="2" placeholder="e.g. Bundle of 2, includes free gift...">${isEdit?escHtml(lead.orderDescription||''):''}</textarea></div>
   </div>
-  <div class="mf"><button class="btn btn-out" onclick="closeM1()">Cancel</button><button class="btn btn-pri" onclick="saveOrgLead()">Save Lead</button></div>`;
+  <div class="mf">
+    ${isEdit?`<button class="btn btn-bad btn-sm" onclick="deleteOrgLead(${id})" style="margin-right:auto">Delete</button>`:''}
+    <button class="btn btn-out" onclick="closeM1()">Cancel</button>
+    <button class="btn btn-pri" onclick="saveOrgLead(${isEdit?id:'null'})">${isEdit?'Save changes':'Save Lead'}</button>
+  </div>`;
   openM1();
 }
 
-async function saveOrgLead(){
+async function saveOrgLead(id){
   const me=u();
+  const isNew = id==='null'||id===null;
   const entryDate=document.getElementById('ol_date')?.value||todayYMD();
   const platform=document.getElementById('ol_platform')?.value;
   const name=document.getElementById('ol_name')?.value?.trim();
   const city=document.getElementById('ol_city')?.value?.trim()||'';
   const phone=document.getElementById('ol_phone')?.value?.trim()||'';
+  const productIdRaw=document.getElementById('ol_product')?.value;
+  const productId=productIdRaw?parseInt(productIdRaw):null;
+  const productName=productId?(pr(productId)?.name||''):'';
+  const priceRaw=document.getElementById('ol_price')?.value;
+  const priceKsh=(priceRaw!==undefined&&priceRaw!=='')?parseFloat(priceRaw):null;
+  const quantity=parseInt(document.getElementById('ol_qty')?.value)||1;
+  const orderDescription=document.getElementById('ol_desc')?.value?.trim()||'';
   if(!platform||!name){ alert('Platform and name are required.'); return; }
-  const {data,error}=await sb.from('organic_leads').insert([{employee_id:me.id,entry_date:entryDate,platform,name,city,phone,status:'not_shipped'}]).select().single();
-  if(error){ alert('Could not save: '+error.message); return; }
-  if(data) APP.orgLeads.unshift(rowToOrgLead(data));
-  await logHistory('created','organic_lead',data?.id||0,`${me.name} logged a lead: ${name} (${platform}) — ${entryDate}`);
+
+  const row={ entry_date:entryDate, platform, name, city, phone, product_id:productId, product_name:productName, price_ksh:priceKsh, quantity, order_description:orderDescription };
+
+  if(isNew){
+    const {data,error}=await sb.from('organic_leads').insert([{...row, employee_id:me.id, status:'not_shipped'}]).select().single();
+    if(error){ alert('Could not save: '+error.message); return; }
+    if(data) APP.orgLeads.unshift(rowToOrgLead(data));
+    await logHistory('created','organic_lead',data?.id||0,`${me.name} logged a lead: ${name} (${platform}) — ${entryDate}`);
+  } else {
+    const numId=parseInt(id)||id;
+    const {data,error}=await sb.from('organic_leads').update(row).eq('id',numId).select();
+    if(error){ alert('Save failed: '+error.message); return; }
+    if(!data||data.length===0){ alert('Warning: lead not found in database — not saved. Refresh and try again.'); return; }
+    const l=APP.orgLeads.find(x=>x.id===numId);
+    if(l) Object.assign(l,{entryDate,platform,name,city,phone,productId,productName,priceKsh,quantity,orderDescription});
+    await logHistory('updated','organic_lead',numId,`Edited lead: ${name}`);
+  }
+  closeM1(); render();
+}
+
+async function deleteOrgLead(id){
+  if(!confirm('Delete this lead permanently?')) return;
+  const {error}=await sb.from('organic_leads').delete().eq('id',id);
+  if(error){ alert('Delete failed: '+error.message); return; }
+  APP.orgLeads=APP.orgLeads.filter(l=>l.id!==id);
   closeM1(); render();
 }
 
