@@ -862,6 +862,14 @@ function taskOverallResult(t){
   return 'pending';
 }
 function hasAccess(page){ const me=u(); if(me.role==='admin')return true; return me.perms?.[page]!==undefined && me.perms[page]; }
+// Same check as hasAccess(), but for any user — used to find who should appear as an
+// "employee" for a given organic content section, regardless of their base role.
+function userHasAccess(userId,page){
+  const usr=APP.users[userId];
+  if(!usr) return false;
+  if(usr.role==='admin') return true;
+  return usr.perms?.[page]!==undefined && usr.perms[page];
+}
 
 // Reusable Today / This week / Custom date-filter control.
 // stateKey = dotted path on APP, e.g. 'veDashFilter' — must hold {mode,from,to}
@@ -2469,7 +2477,7 @@ async function saveOrgReport(){
 }
 
 function pgOrganicReportAdmin(){
-  const employees=Object.values(APP.users).filter(x=>x.role==='organic');
+  const employees=Object.values(APP.users).filter(x=>userHasAccess(x.id,'orgreport'));
   const activeTasks=APP.orgTaskDefs.filter(t=>t.active).sort((a,b)=>a.sortOrder-b.sortOrder);
   const leadsTask=APP.orgTaskDefs.find(t=>t.isLeadsMetric);
   if(!APP.orgReportFilter) APP.orgReportFilter={mode:'week',from:'',to:''};
@@ -2490,7 +2498,7 @@ function pgOrganicReportAdmin(){
   </div>`;
 
   if(!employees.length){
-    return filterBar+`<div class="empty"><div class="empty-i">📱</div><div class="empty-t">No organic content employees yet — add one from Team & Users with the "organic" role.</div></div>`;
+    return filterBar+`<div class="empty"><div class="empty-i">📱</div><div class="empty-t">No one has access to this section yet — grant "Organic daily report" access to a user from Team & Users.</div></div>`;
   }
 
   const daysInRange=(rangeFrom&&rangeTo)?(Math.floor((new Date(rangeTo)-new Date(rangeFrom))/86400000)+1):null;
@@ -2552,7 +2560,7 @@ function pgOrganicLeads(){
   const shippedCount=leads.filter(l=>l.status==='shipped').length;
   const deliveredCount=leads.filter(l=>l.status==='delivered').length;
 
-  const employeeBreakdown = isAdmin ? Object.values(APP.users).filter(u=>u.role==='organic').map(emp=>{
+  const employeeBreakdown = isAdmin ? Object.values(APP.users).filter(u=>userHasAccess(u.id,'organicleads')).map(emp=>{
     const empLeads=APP.orgLeads.filter(l=>l.employeeId===emp.id);
     const empValue=empLeads.reduce((s,l)=>s+((parseFloat(l.priceKsh)||0)*(parseInt(l.quantity)||1)),0);
     return { emp, count:empLeads.length, value:empValue };
@@ -2790,7 +2798,7 @@ function pgOrganicPipeline(){
 }
 
 function openOrgPipelineForm(){
-  const employees=Object.values(APP.users).filter(x=>x.role==='organic');
+  const employees=Object.values(APP.users).filter(x=>userHasAccess(x.id,'organicpipeline'));
   document.getElementById('md1').innerHTML=`
   <div class="mh"><div><div class="mt">New Content Item</div><div class="ms">A post request, concept, or piece of content to publish</div></div><button class="btn btn-out btn-sm" onclick="closeM1()">✕</button></div>
   <div class="mb">
