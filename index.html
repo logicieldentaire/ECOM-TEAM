@@ -3151,7 +3151,8 @@ function variantCard(v,i,canVE,canMB,isA,t){
   if(inRevision){
     const feedbackDisplay = v.revisionFeedback ? '<div style="font-size:12px;color:var(--ink);margin-bottom:8px;line-height:1.5">'+escHtml(v.revisionFeedback)+'</div>' : '';
     const revUploadInfo = v.revisionUploadedAt ? '<div style="font-size:11px;margin-top:5px;color:var(--muted)">Revision uploaded '+fmtDateTime(v.revisionUploadedAt)+' '+(revLate===true?'<span class="late">&middot; Late</span>':revLate===false?'<span class="ontime">&middot; On time</span>':'')+'</div>' : '';
-    const veRevInput = canVE||isA ? '<label class="fl" style="color:var(--warn)">Upload revised video link</label><input class="fi" data-vfield="revisionLink" data-vidx="'+i+'" value="'+(v.revisionLink||'')+'" placeholder="https://drive.google.com/... (revised version)">'+revUploadInfo : '<div style="font-size:12px;color:var(--muted)">Waiting for editor to upload revised version.</div>';
+    const revLockNote = canVE&&!isA&&v.revisionLink ? '<div style="font-size:10px;color:var(--muted);margin-top:4px">🔒 Locked once uploaded — ask your media buyer if this needs to change</div>' : '';
+    const veRevInput = canVE||isA ? '<label class="fl" style="color:var(--warn)">Upload revised video link</label><input class="fi" data-vfield="revisionLink" data-vidx="'+i+'" value="'+(v.revisionLink||'')+'" placeholder="https://drive.google.com/... (revised version)" '+((canVE&&!isA&&v.revisionLink)?'disabled':'')+'>'+revLockNote+revUploadInfo : '<div style="font-size:12px;color:var(--muted)">Waiting for editor to upload revised version.</div>';
     revisionBlock = '<div style="padding:11px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-radius:8px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--warn);margin-bottom:4px">&#8634; Revision requested</div>'+feedbackDisplay+veRevInput+'</div>';
   }
   const revisedLink = v.revisionLink&&!inRevision ? '<div style="padding:9px 12px;background:var(--ok-bg);border:1px solid var(--ok-bd);border-radius:8px;margin-bottom:10px;font-size:12px"><b>Revised:</b> <a href="'+v.revisionLink+'" target="_blank" style="color:var(--accent)">Open &#8599;</a></div>' : '';
@@ -3197,7 +3198,8 @@ function variantCard(v,i,canVE,canMB,isA,t){
     +'<div class="fg" style="margin-bottom:10px"><label class="fl">Hook text</label>'
     +'<input class="fi" data-vfield="hook" data-vidx="'+i+'" value="'+(v.hook||'').replace(/"/g,'&quot;')+'" placeholder="Hook for this variant..." '+((!canVE&&!isA)?'disabled':'')+'></div>'
     +'<div class="fg" style="margin-bottom:10px"><label class="fl">Video link</label>'
-    +'<input class="fi" data-vfield="videoLink" data-vidx="'+i+'" value="'+(v.videoLink||'')+'" placeholder="https://drive.google.com/..." '+((!canVE&&!isA)?'disabled':'')+'>'
+    +'<input class="fi" data-vfield="videoLink" data-vidx="'+i+'" value="'+(v.videoLink||'')+'" placeholder="https://drive.google.com/..." '+((!canVE&&!isA)||(canVE&&!isA&&v.videoLink)?'disabled':'')+'>'
+    +(canVE&&!isA&&v.videoLink?'<div style="font-size:10px;color:var(--muted);margin-top:4px">🔒 Locked once uploaded — ask your media buyer if this needs to change</div>':'')
     +uploadInfo+videoOpenLink+'</div>'
     +revisionBlock+revisedLink+reviewBlock
     +'</div></div>';
