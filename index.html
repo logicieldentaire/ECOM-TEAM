@@ -3144,7 +3144,7 @@ function variantCard(v,i,canVE,canMB,isA,t){
   const borderColor = isApproved?'var(--ok-bd)':inRevision?'var(--warn-bd)':'var(--border)';
   const headerBg   = isApproved?'var(--ok-bg)':inRevision?'var(--warn-bg)':'var(--s50)';
   const statusLabel = isApproved?'&#10003; Approved':inRevision?'&#8634; Needs revision':v.videoLink?'Waiting for approval':'Pending upload';
-  const rmBtn = (canVE||isA)&&i>0 ? '<button class="btn btn-ghost btn-xs" onclick="removeVariant('+i+')">Remove</button>' : '';
+  const rmBtn = (canMB||isA)&&i>0 ? '<button class="btn btn-ghost btn-xs" onclick="removeVariant('+i+')">Remove</button>' : '';
   const uploadInfo = v.uploadedAt ? '<div style="font-size:11px;margin-top:5px;color:var(--muted)">Uploaded '+fmtDateTime(v.uploadedAt)+' '+(late===true?'<span class="late">&middot; Late</span>':late===false?'<span class="ontime">&middot; On time</span>':'')+'</div>' : '';
   const videoOpenLink = v.videoLink ? '<a href="'+v.videoLink+'" target="_blank" style="display:inline-block;margin-top:5px;font-size:11px;color:var(--accent)">Open video &#8599;</a>' : '';
   let revisionBlock = '';
@@ -3211,6 +3211,8 @@ function addVariant(){
   renderTaskModalBody();
 }
 function removeVariant(i){
+  const me=u();
+  if(me.role!=='media_buyer'&&me.role!=='admin'){ alert('Only the media buyer or admin can remove a hook variant.'); return; }
   syncVariantsFromDOM();
   APP.selTask.variants.splice(i,1);
   renderTaskModalBody();
@@ -3288,6 +3290,8 @@ async function saveTask(id){
   closeM1(); render();
 }
 async function delTask(id){
+  const me=u();
+  if(me.role!=='media_buyer'&&me.role!=='admin'){ alert('Only the media buyer or admin can delete a task.'); return; }
   const t=tk(id); if(!t)return;
   if(!confirm('Delete this task permanently? This cannot be undone.')) return;
   const name=pr(t.productId)?.name||t.testProductName||'product';
