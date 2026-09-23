@@ -3970,7 +3970,9 @@ function prodTabContent(t,pid){
   if(t==='v'){
     const me2=u();
     const canReview = me2.role==='media_buyer'||me2.role==='admin';
-    const pTasks = APP.tasks.filter(tk=>tk.productId===pid && !tk.isTest);
+    const isVE2 = me2.role==='video_editor';
+    let pTasks = APP.tasks.filter(tk=>tk.productId===pid && !tk.isTest);
+    if(isVE2) pTasks = pTasks.filter(tk=>tk.assignedVE===me2.id);
     if(!pTasks.length) return `<div class="empty"><div class="empty-i">🎬</div><div class="empty-t">No tasks assigned for this product yet</div></div>`;
     const byAngle = {};
     pTasks.forEach(task=>{
