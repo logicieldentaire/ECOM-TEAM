@@ -308,7 +308,7 @@ function hideLoader(){ document.getElementById('loadingOverlay').style.display='
 
 // ─── Row → APP format converters ───
 function rowToUser(r){ return { id:r.id, name:r.name, role:r.role, av:r.av, email:r.email, pwd:r.pwd, products:r.products||[], ves:(r.ves||[]).filter(Boolean), ve:null, active:r.active, perms:r.perms||{} }; }
-function rowToProduct(r){ return { id:r.id, name:r.name, market:r.market, lang:r.lang, cat:r.cat, url:r.url, images:r.images||[], angles:r.angles||[], hooks:r.hooks||[], rawVideo:r.raw_video||'', status:r.status||'High stock', priority:r.priority||'Medium', storeLinks:r.store_links||[], adImagesLink:r.ad_images_link||'', adsPlatforms:r.ads_platforms||[], isCod:r.is_cod||false, isContent:r.is_content||false }; }
+function rowToProduct(r){ return { id:r.id, name:r.name, market:r.market, lang:r.lang, cat:r.cat, url:r.url, images:r.images||[], angles:r.angles||[], hooks:r.hooks||[], rawVideo:r.raw_video||'', status:r.status||'High stock', priority:r.priority||'Medium', storeLinks:r.store_links||[], adImagesLink:r.ad_images_link||'', adsPlatforms:r.ads_platforms||[], isCod:r.is_cod||false, isContent:r.is_content||false, notes:r.notes||[] }; }
 function rowToTestProduct(r){ return { id:r.id, name:r.name, url:r.url, market:r.market, lang:r.lang, notes:r.notes||'', assignedMBs:r.assigned_mbs||[], status:r.status||'testing', priority:r.priority||'Medium', testResults:r.test_results||[], images:r.images||[], createdAt:r.created_at }; }
 function rowToTask(r){ return { id:r.id, productId:r.product_id, testProductId:r.test_product_id, taskDate:r.task_date, day:r.day, assignedMB:r.assigned_mb, assignedVE:r.assigned_ve, campaignType:r.campaign_type, videoType:r.video_type, voiceOver:r.voice_over, angle:r.angle, variants:r.variants||[], status:r.status, revisionNote:r.revision_note||'', mbNote:r.mb_note||'', managerApproval:r.manager_approval||'pending', deadlineDate:r.deadline_date, isTest:r.is_test||false, testProductName:r.test_product_name||'', testMarket:r.test_market||'', createdAt:r.created_at, updatedAt:r.updated_at }; }
 function rowToReport(r){ return { id:r.id, mbId:r.mb_id, productId:r.product_id, date:r.date, spend:r.spend, leads:r.leads, cpl:r.cpl, platform:r.platform||'Facebook Ads' }; }
@@ -966,7 +966,7 @@ async function login(){
 // ─── Real-time sync (poll every 30s) ───
 let _syncInterval = null;
 // Column lists WITHOUT the heavy `images` JSONB — sync merges images from memory instead.
-const PROD_SYNC_COLS='id,name,market,lang,cat,url,angles,hooks,raw_video,status,priority,store_links,ad_images_link,ads_platforms,is_cod,is_content,created_at';
+const PROD_SYNC_COLS='id,name,market,lang,cat,url,angles,hooks,raw_video,status,priority,store_links,ad_images_link,ads_platforms,is_cod,is_content,notes,created_at';
 const TP_SYNC_COLS='id,name,url,market,lang,notes,assigned_mbs,status,priority,test_results,created_at';
 async function syncData(){
   if(!APP.authed) return;
@@ -1612,10 +1612,12 @@ function pgProducts(){
       const wc = APP.tasks.filter(t=>t.productId===p.id&&taskHasWinner(t)).length;
       const hasImg=p.images&&p.images.length;
       const hasRaw=p.rawVideo&&p.rawVideo.trim();
+      const myNoteCount=(p.notes||[]).filter(n=>canManage||me.role==='media_buyer'?true:(n.target==='all'||String(n.target)===String(me.id))).length;
       return `<div class="pcard" onclick="openProductModal(${p.id})">
         <div class="pcard-img">${hasImg?`<img src="${p.images[0]}">`:'▣'}</div>
         <div class="pcard-b">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px"><div class="pcard-n">${p.name}</div>${mchip(p.market)}</div>
+          ${myNoteCount?`<div style="margin-bottom:4px"><span class="chip chip-w" style="font-weight:700">📌 ${myNoteCount} note${myNoteCount>1?'s':''}</span></div>`:''}
           <div class="pcard-u">${p.url}</div>
           <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">${chip(p.status||'High stock',STOCK_STATUS_STYLE[p.status]||'n')}${chip((p.priority||'Medium')+' priority',PRIORITY_STYLE[p.priority]||'n')}${p.isCod?'<span class="chip chip-a" style="font-weight:700">🚚 COD</span>':''}${p.isContent?'<span class="chip chip-ok" style="font-weight:700">📹 Content</span>':''}${(p.adsPlatforms||[]).map(pl=>chip(pl==='TikTok Ads'?'🎵 TikTok':'📘 Facebook','n')).join('')}</div>
           <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">${chip(p.cat,'n')}${chip(p.lang,'n')}${hasRaw?chip('Raw ✓','ok'):''}</div>
@@ -2532,18 +2534,54 @@ function pgOrganicReportAdmin(){
     <div class="kpi"><div class="kpi-l">Days in range</div><div class="kpi-v">${daysInRange||'—'}</div></div>
   </div>
   <div class="tw"><table>
-    <thead><tr><th>Employee</th><th>Days reported</th><th>Consistency</th><th>Task completion</th><th>Leads collected (self-reported)</th><th>Leads logged (actual)</th></tr></thead>
+    <thead><tr><th>Employee</th><th>Days reported</th><th>Consistency</th><th>Task completion</th><th>Leads collected (self-reported)</th><th>Leads logged (actual)</th><th></th></tr></thead>
     <tbody>
-    ${rows.map(r=>`<tr>
+    ${rows.map(r=>`<tr class="clickable" onclick="openOrgReportDetail('${r.emp.id}')">
       <td><div style="display:flex;align-items:center;gap:9px">${av(r.emp.id,28)}<b>${r.emp.name}</b></div></td>
       <td>${r.submittedDays}${daysInRange?' / '+daysInRange:''}</td>
       <td>${r.consistency!==null?`<span class="${r.consistency>=80?'ontime':r.consistency>=50?'':'late'}">${r.consistency}%</span>`:'—'}</td>
       <td>${r.completionRate!==null?r.completionRate+'%':'—'}</td>
       <td><b>${r.leadsTotal}</b></td>
       <td><b>${r.realLeadsCount}</b></td>
+      <td><button class="btn btn-out btn-xs" onclick="event.stopPropagation();openOrgReportDetail('${r.emp.id}')">View checklist</button></td>
     </tr>`).join('')}
     </tbody>
   </table></div>`;
+}
+
+// ── Admin: view an employee's actual checked-off daily reports (same shape as the employee sees) ──
+function openOrgReportDetail(empId){
+  const emp=APP.users[empId]; if(!emp) return;
+  const activeTasks=APP.orgTaskDefs.filter(t=>t.active).sort((a,b)=>a.sortOrder-b.sortOrder);
+  const f=APP.orgReportFilter||{mode:'week',from:'',to:''};
+  let rangeFrom,rangeTo;
+  if(f.mode==='week'){ rangeFrom=weekStartOf(todayYMD()); rangeTo=todayYMD(); }
+  else if(f.mode==='month'){ rangeFrom=todayYMD().slice(0,7)+'-01'; rangeTo=todayYMD(); }
+  else { rangeFrom=f.from; rangeTo=f.to; }
+  let reps=APP.orgReports.filter(r=>r.employeeId===empId);
+  if(rangeFrom) reps=reps.filter(r=>r.reportDate>=rangeFrom);
+  if(rangeTo)   reps=reps.filter(r=>r.reportDate<=rangeTo);
+  reps=reps.sort((a,b)=>b.reportDate.localeCompare(a.reportDate));
+
+  const cardsHtml = reps.length ? reps.map(r=>`
+    <div class="card" style="margin-bottom:14px"><div class="card-b" style="padding:16px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px">${fmtDate(r.reportDate)}</div>
+      ${activeTasks.map(t=>{
+        const val=r.answers[t.id];
+        if(t.type==='number'){
+          return `<div class="fg"><label class="fl">${escHtml(t.label)}</label><div style="font-size:14px;font-weight:700">${val!==undefined?val:'—'}</div></div>`;
+        }
+        const checked=val===true;
+        return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1.5px solid ${checked?'var(--ok-bd)':'var(--border)'};border-radius:9px;margin-bottom:6px;background:${checked?'var(--ok-bg)':'#fff'}">
+          <span style="font-size:16px">${checked?'✅':'⬜'}</span><span style="font-size:13px;font-weight:600">${escHtml(t.label)}</span>
+        </div>`;
+      }).join('')}
+    </div></div>`).join('') : `<div class="empty"><div class="empty-i">📱</div><div class="empty-t">No reports in this date range</div></div>`;
+
+  document.getElementById('md2').innerHTML=`
+  <div class="mh"><div style="flex:1;min-width:0"><div class="mt">${av(emp.id,28)} ${emp.name} — Daily checklist</div><div class="ms">${fmtDate(rangeFrom)} to ${fmtDate(rangeTo)} · ${reps.length} day${reps.length!==1?'s':''} reported</div></div><button class="btn btn-out btn-sm" onclick="closeM2()">✕</button></div>
+  <div class="mb">${cardsHtml}</div>`;
+  openM2();
 }
 
 // ── Leads page ──
@@ -3909,13 +3947,14 @@ function openProductModal(pid){
       <button class="tab" id="pt_v" onclick="prodTab('v',${pid})">🎬 Videos</button>
       <button class="tab" id="pt_i" onclick="prodTab('i',${pid})">🖼 Images (${(p.images||[]).length})</button>
       <button class="tab" id="pt_r" onclick="prodTab('r',${pid})">📁 Raw Clips</button>
+      <button class="tab" id="pt_n" onclick="prodTab('n',${pid})">📌 Notes${(p.notes||[]).length?' ('+p.notes.length+')':''}</button>
       ${isA?`<button class="tab" id="pt_s" onclick="prodTab('s',${pid})">📊 Stats</button>`:''}
     </div>
     <div id="ptc">${prodTabContent('a',pid)}</div>
   </div>`;
   openM2();
 }
-function prodTab(t,pid){ ['a','h','v','i','r','s'].forEach(k=>{const el=document.getElementById('pt_'+k); if(el) el.className='tab'+(k===t?' on':'');}); document.getElementById('ptc').innerHTML=prodTabContent(t,pid); }
+function prodTab(t,pid){ ['a','h','v','i','r','n','s'].forEach(k=>{const el=document.getElementById('pt_'+k); if(el) el.className='tab'+(k===t?' on':'');}); document.getElementById('ptc').innerHTML=prodTabContent(t,pid); }
 function prodTabContent(t,pid){
   const p=pr(pid); const me=u(); const isVE=me.role==='video_editor', isA=me.role==='admin', isPL=me.role==='product_lister', isMB=me.role==='media_buyer';
   const canManage = isA || isPL;
@@ -4086,6 +4125,36 @@ H02 Leaking pipe at 2AM? Fixed in 10 min
       +'<div style="flex:1;min-width:0"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">'+(has?'Raw clips available':'No clips uploaded')+'</div>'+linkEl+'</div>'
       +openBtn+'</div>'+editSection;
   }
+  if(t==='n'){
+    const canAddNote = canManage || isMB;
+    const notes = [...(p.notes||[])].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+    const visibleNotes = canAddNote ? notes : notes.filter(n=>n.target==='all'||String(n.target)===String(me.id));
+    const employeeOpts = Object.values(APP.users).filter(x=>x.role!=='admin'&&x.active!==false).sort((a,b)=>a.name.localeCompare(b.name));
+    const formHtml = canAddNote ? `
+      <div class="card" style="margin-bottom:16px"><div class="card-b" style="padding:14px">
+        <div class="fg"><label class="fl">Note</label><textarea class="fi" id="pnote_text_${pid}" rows="3" placeholder="Write an instruction or note about this product..."></textarea></div>
+        <div class="fg"><label class="fl">Destined to</label>
+          <select class="fi" id="pnote_target_${pid}">
+            <option value="all">👥 All employees</option>
+            ${employeeOpts.map(e=>`<option value="${e.id}">${e.name} (${e.role.replace('_',' ')})</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-pri btn-sm" onclick="saveProductNote(${pid})">+ Add note</button>
+      </div></div>` : '';
+    const notesHtml = visibleNotes.length ? visibleNotes.map(n=>{
+      const targetLabel = n.target==='all' ? '👥 All employees' : (APP.users[n.target]?.name||'Unknown');
+      const canDel = isA || String(n.authorId)===String(me.id);
+      return `<div style="padding:12px 14px;border:1.5px solid var(--border);border-radius:9px;margin-bottom:8px;background:#fff">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px">
+          <span class="chip chip-a" style="font-weight:700">${targetLabel}</span>
+          ${canDel?`<button class="btn btn-ghost btn-xs" onclick="delProductNote(${pid},'${n.id}')">✕</button>`:''}
+        </div>
+        <div style="font-size:13px;line-height:1.5;margin-bottom:6px;white-space:pre-wrap">${escHtml(n.text)}</div>
+        <div style="font-size:11px;color:var(--muted)">${av(n.authorId,16)} ${APP.users[n.authorId]?.name||'?'} · ${fmtDateTime(n.createdAt)}</div>
+      </div>`;
+    }).join('') : `<div class="empty"><div class="empty-i">📌</div><div class="empty-t">No notes ${canAddNote?'yet':'for you'} on this product</div></div>`;
+    return formHtml + notesHtml;
+  }
 }
 async function setVideoAdResult(taskId, variantIdx, result, pid){
   const t=APP.tasks.find(x=>x.id===taskId);
@@ -4135,6 +4204,30 @@ async function saveAdImagesLink(pid){
   prodTab('i',pid);
 }
 async function saveRaw(pid){ pr(pid).rawVideo=document.getElementById('raw_'+pid).value.trim(); await sb.from('products').update({raw_video:pr(pid).rawVideo}).eq('id',pid); prodTab('r',pid); render(); }
+async function saveProductNote(pid){
+  const p=pr(pid); const me=u();
+  const textEl=document.getElementById('pnote_text_'+pid);
+  const targetEl=document.getElementById('pnote_target_'+pid);
+  const text=textEl?.value?.trim();
+  if(!text){ alert('Write a note first.'); return; }
+  const target=targetEl?.value||'all';
+  const note={ id:'n'+Date.now()+Math.floor(Math.random()*1000), text, target, authorId:me.id, createdAt:new Date().toISOString() };
+  const newNotes=[...(p.notes||[]), note];
+  const {data,error}=await sb.from('products').update({notes:newNotes}).eq('id',pid).select();
+  if(error){ alert('Save failed: '+error.message); return; }
+  if(!data||data.length===0){ alert('Warning: product not found in database — note not saved. Refresh and try again.'); return; }
+  p.notes=newNotes;
+  prodTab('n',pid);
+}
+async function delProductNote(pid,noteId){
+  if(!confirm('Delete this note?')) return;
+  const p=pr(pid);
+  const newNotes=(p.notes||[]).filter(n=>String(n.id)!==String(noteId));
+  const {error}=await sb.from('products').update({notes:newNotes}).eq('id',pid);
+  if(error){ alert('Delete failed: '+error.message); return; }
+  p.notes=newNotes;
+  prodTab('n',pid);
+}
 
 // ══════════════════════════════════════════════════════════
 // MODAL: PRODUCT FORM (add / edit, paste-based)
@@ -4262,7 +4355,7 @@ async function saveProduct(editId){
   const hooks=parseLines(document.getElementById('p_hooks').value);
   if(!name||!url){ alert('Name and URL required.'); return; }
   if(editId==='null'||editId===null){
-    const row={name,url,cat,market,lang,images:[..._formImgs],angles,hooks,raw_video:'',status,priority,store_links:storeLinks,ads_platforms:adsPlatforms,is_cod:isCod,is_content:isContent};
+    const row={name,url,cat,market,lang,images:[..._formImgs],angles,hooks,raw_video:'',status,priority,store_links:storeLinks,ads_platforms:adsPlatforms,is_cod:isCod,is_content:isContent,notes:[]};
     const { data } = await sb.from('products').insert([row]).select().single();
     if(data) APP.products.push(rowToProduct(data));
     await logHistory('created','product',data?.id||0,`Added product "${name}" (${market}) — ${isCod?'COD · ':''}${isContent?'Content OK · ':''}${angles.length} angles, priority: ${priority}`);
