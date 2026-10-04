@@ -497,7 +497,12 @@ const DAY_IDX = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5 };
 // IMPORTANT: always use LOCAL date components, never toISOString() (which shifts to UTC
 // and silently rolls the date backward/forward by a day depending on timezone).
 function toYMD(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
-function todayYMD(){ return toYMD(new Date()); }
+// APP_TZ: the whole platform runs on Moroccan time no matter where an employee's
+// browser/device is set to (e.g. team members in Pakistan) — every "today", deadline
+// and displayed timestamp is computed/shown in this timezone, never the visitor's local one.
+const APP_TZ = 'Africa/Casablanca';
+function ymdMA(d){ return d.toLocaleDateString('en-CA', { timeZone: APP_TZ }); } // en-CA => YYYY-MM-DD, read in Morocco time regardless of the viewer's own timezone
+function todayYMD(){ return ymdMA(new Date()); }
 function isoWeek(d){
   const tmp=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
   tmp.setUTCDate(tmp.getUTCDate()+4-(tmp.getUTCDay()||7));
@@ -505,7 +510,7 @@ function isoWeek(d){
   return Math.ceil((((tmp-y0)/86400000)+1)/7);
 }
 function dayName(d){ return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()]; }
-function daysAgo(n){ const d=new Date(); d.setDate(d.getDate()-n); return toYMD(d); }
+function daysAgo(n){ const d=new Date(todayYMD()+'T00:00:00'); d.setDate(d.getDate()-n); return toYMD(d); }
 // Resolve a {mode, from, to} filter object into a concrete [from,to] date range (YYYY-MM-DD)
 function resolveDateFilter(f){
   const today=todayYMD();
@@ -816,8 +821,8 @@ function chip(t,c='n'){ return `<span class="chip chip-${c}">${t}</span>`; }
 function mchip(m){ return `<span class="chip chip-n"><span class="dot" style="background:${col('youssef')}"></span>${m}</span>`; }
 function sChip(s){ const m={done:'ok',in_progress:'a',in_revision:'w',pending:'n',approved:'ok'}; const l={done:'Done',in_progress:'In progress',in_revision:'Revision',pending:'Pending',approved:'Approved'}; return chip(l[s]||'Pending', m[s]||'n'); }
 function rChip(r){ const m={winner:'ok',loser:'b',pending:'n'}; const l={winner:'Winner',loser:'Loser',pending:'Pending'}; return chip(l[r]||'Pending', m[r]||'n'); }
-function fmtDateTime(iso){ if(!iso)return '—'; const d=new Date(iso); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}); }
-function fmtDate(iso){ if(!iso)return '—'; return new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
+function fmtDateTime(iso){ if(!iso)return '—'; const d=new Date(iso); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',timeZone:APP_TZ})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:APP_TZ}); }
+function fmtDate(iso){ if(!iso)return '—'; return new Date(iso).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:APP_TZ}); }
 function isLate(t){
   if(!t.deadlineDate) return null;
   const upl = taskLatestUpload(t);
@@ -826,7 +831,7 @@ function isLate(t){
   // uploadedAt is an ISO timestamp — extract its LOCAL date for comparison
   const deadlineYMD = (t.deadlineDate||'').slice(0,10);
   if(!deadlineYMD) return null;
-  const uplDate = toYMD(new Date(upl)); // convert upload timestamp to local YYYY-MM-DD
+  const uplDate = ymdMA(new Date(upl)); // convert upload timestamp to Moroccan YYYY-MM-DD
   if(uplDate < deadlineYMD) return false; // uploaded before deadline day = on time
   if(uplDate > deadlineYMD) return true;  // uploaded after deadline day = late
   // Same day — on time (upload was on the deadline day itself)
@@ -848,6 +853,18 @@ function taskLoserCount(t){ return (t.variants||[]).filter(v=>v.adResult==='lose
 function taskHasWinner(t){ return taskWinnerCount(t)>0; }
 function taskHasFeedback(t){
   return t.variants&&t.variants.some(v=>v.mbFeedback||v.revisionFeedback);
+}
+// True once the editor has re-uploaded a link for every variant currently in revision
+// (the task is still "in_revision" status-wise until the MB/admin re-reviews it).
+function taskRevisionDone(t){
+  if(t.status!=='in_revision'||!t.variants) return false;
+  const needingRevision = t.variants.filter(v=>v.mbResult==='needs_revision');
+  if(!needingRevision.length) return false;
+  return needingRevision.every(v=>!!v.revisionLink);
+}
+function statusChipForTask(t){
+  if(t.status==='in_revision' && taskRevisionDone(t)) return chip('&#10003; Revision done','ok');
+  return sChip(t.status);
 }
 function taskOverallResult(t){
   if(!t.variants||!t.variants.length) return t.mbResult||'pending';
@@ -1022,7 +1039,7 @@ function renderPreservingScroll(){
   if(newPg) newPg.scrollTop = scrollY;
 }
 // Tasks older than 120 days are not loaded (keeps payload small as history grows)
-function taskCutoffYMD(){ const d=new Date(); d.setDate(d.getDate()-120); return toYMD(d); }
+function taskCutoffYMD(){ const d=new Date(todayYMD()+'T00:00:00'); d.setDate(d.getDate()-120); return toYMD(d); }
 function startSync(){
   if(_syncInterval) clearInterval(_syncInterval);
   _syncInterval = setInterval(syncData, 30000); // every 30 seconds
@@ -1170,7 +1187,7 @@ function dashVE(veId){
   const todayBlock = todayTasks.length ? `
     <div class="card" style="margin-bottom:18px;border-color:var(--accent)">
       <div class="card-h" style="background:var(--accent-bg)">
-        <div class="card-t" style="color:var(--accent)">Today's tasks — ${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</div>
+        <div class="card-t" style="color:var(--accent)">Today's tasks — ${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',timeZone:APP_TZ})}</div>
         <span class="chip chip-a">${todayTasks.length} task${todayTasks.length>1?'s':''}</span>
       </div>
       <div class="tw"><table>
@@ -1183,14 +1200,14 @@ function dashVE(veId){
             <td style="font-size:11px;color:var(--sub);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.angle.slice(0,48)}${t.angle.length>48?'…':''}</td>
             <td style="font-size:11px;color:var(--sub)">${t.videoType}</td>
             <td style="font-size:11px;color:var(--sub)">${t.voiceOver}</td>
-            <td>${sChip(t.status)}</td>
+            <td>${statusChipForTask(t)}</td>
             <td><button class="btn btn-out btn-xs" onclick="event.stopPropagation();openTask(${t.id})">Open</button></td>
           </tr>`;
         }).join('')}</tbody>
       </table></div>
     </div>` : `
     <div class="card" style="margin-bottom:18px">
-      <div class="card-h"><div class="card-t">Today — ${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'})}</div></div>
+      <div class="card-h"><div class="card-t">Today — ${new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',timeZone:APP_TZ})}</div></div>
       <div class="empty" style="padding:24px"><div class="empty-i" style="font-size:26px">✓</div><div class="empty-t">No tasks assigned today</div></div>
     </div>`;
 
@@ -1244,14 +1261,22 @@ function dashMB(mbId){
 function pgTasks(){
   const me=u();
   const today=todayYMD();
-  if(!APP.tasksFilter) APP.tasksFilter={mode:'week',offset:0,from:'',to:''};
+  if(!APP.tasksFilter) APP.tasksFilter={mode:'week',offset:0,from:'',to:'',editorId:'all'};
   const tf=APP.tasksFilter;
+  if(tf.editorId===undefined) tf.editorId='all';
 
   // Resolve the active range based on mode
   let rangeStart, rangeEnd, dayList; // dayList: array of {ymd,label} to render as grouped rows (only for week-like modes)
   if(tf.mode==='today'){
     rangeStart=today; rangeEnd=today;
     dayList=[{ ymd: today, label: dayName(new Date(today+'T00:00:00')) }];
+  } else if(tf.mode==='lastweek'){
+    const ws=weekStartOf(today);
+    const lws=new Date(ws+'T00:00:00'); lws.setDate(lws.getDate()-7);
+    rangeStart=toYMD(lws);
+    dayList=[];
+    for(let i=0;i<6;i++){ const d=new Date(lws); d.setDate(lws.getDate()+i); dayList.push({ymd:toYMD(d), label:DAYS[i]}); }
+    rangeEnd=dayList[dayList.length-1].ymd;
   } else if(tf.mode==='nextweek'){
     const ws=weekStartOf(today);
     const nws=new Date(ws+'T00:00:00'); nws.setDate(nws.getDate()+7);
@@ -1274,7 +1299,13 @@ function pgTasks(){
   }
 
   const isMB=me.role==='media_buyer';
-  const rangeT = myTasks().filter(t=>t.taskDate>=rangeStart&&t.taskDate<=rangeEnd);
+  const editors = Object.values(APP.users).filter(x=>x.role==='video_editor').sort((a,b)=>a.name.localeCompare(b.name));
+  const scopedTasks = () => {
+    let list = myTasks();
+    if(tf.editorId && tf.editorId!=='all') list = list.filter(t=>String(t.assignedVE)===String(tf.editorId));
+    return list;
+  };
+  const rangeT = scopedTasks().filter(t=>t.taskDate>=rangeStart&&t.taskDate<=rangeEnd);
 
   const tabs = isMB ? [
     {id:'all',l:`All (${rangeT.length})`},
@@ -1302,8 +1333,8 @@ function pgTasks(){
 
   // Build table rows grouped by day with colored separator rows
   const rows = dayList.map(({ymd, label})=>{
-    const dt = applyTab(myTasks().filter(t=>t.taskDate===ymd));
-    const allDt = myTasks().filter(t=>t.taskDate===ymd);
+    const dt = applyTab(scopedTasks().filter(t=>t.taskDate===ymd));
+    const allDt = scopedTasks().filter(t=>t.taskDate===ymd);
     const isToday = ymd===today;
     const isPast  = ymd<today;
     const doneCnt = allDt.filter(t=>t.status==='done').length;
@@ -1333,7 +1364,7 @@ function pgTasks(){
         <td style="font-size:11px;color:var(--sub);max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.videoType}</td>
         <td style="font-size:11px;color:var(--sub);max-width:100px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.voiceOver}</td>
         <td>${av(t.assignedVE,24)}</td>
-        <td>${sChip(t.status)}</td>
+        <td>${statusChipForTask(t)}</td>
         <td style="white-space:nowrap">${upl?fmtDateTime(upl):'<span style="color:var(--muted)">—</span>'}</td>
         <td>${late===true?'<span class="late">Late</span>':late===false?'<span class="ontime">On time</span>':'<span style="color:var(--muted)">—</span>'}</td>
         <td>${taskHasFeedback(t)?chip('Feedback given','ok'):'<span style="color:var(--muted)">—</span>'}</td>
@@ -1344,6 +1375,7 @@ function pgTasks(){
   }).join('');
 
   const rangeLabel = tf.mode==='today' ? `Today — ${fmtDate(today)}`
+    : tf.mode==='lastweek' ? `Last week — ${fmtDate(rangeStart)} to ${fmtDate(rangeEnd)}`
     : tf.mode==='nextweek' ? `Next week — ${fmtDate(rangeStart)} to ${fmtDate(rangeEnd)}`
     : tf.mode==='custom' ? `${fmtDate(rangeStart)} to ${fmtDate(rangeEnd)}`
     : `This week — ${fmtDate(rangeStart)} to ${fmtDate(rangeEnd)}`;
@@ -1352,6 +1384,7 @@ function pgTasks(){
   <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:10px">
     <button class="upill ${tf.mode==='today'?'on':''}" onclick="setTasksFilterMode('today')" type="button">Today</button>
     <button class="upill ${tf.mode==='week'?'on':''}" onclick="setTasksFilterMode('week')" type="button">This week</button>
+    <button class="upill ${tf.mode==='lastweek'?'on':''}" onclick="setTasksFilterMode('lastweek')" type="button">Last week</button>
     <button class="upill ${tf.mode==='nextweek'?'on':''}" onclick="setTasksFilterMode('nextweek')" type="button">Next week</button>
     <button class="upill ${tf.mode==='custom'?'on':''}" onclick="setTasksFilterMode('custom')" type="button">Custom</button>
     ${tf.mode==='custom'?`
@@ -1359,7 +1392,38 @@ function pgTasks(){
       <span style="color:var(--muted);font-size:12px">to</span>
       <input type="date" class="fi" style="width:auto;padding:5px 9px;font-size:12px" value="${tf.to}" onchange="APP.tasksFilter.to=this.value;render()">
     `:''}
+    ${(me.role==='admin'||isMB)&&editors.length?`
+      <span style="color:var(--muted);font-size:12px;margin-left:6px">Editor:</span>
+      <select class="fi" style="width:auto;padding:5px 9px;font-size:12px" onchange="APP.tasksFilter.editorId=this.value;render()">
+        <option value="all" ${tf.editorId==='all'?'selected':''}>All editors</option>
+        ${editors.map(e=>`<option value="${e.id}" ${String(tf.editorId)===String(e.id)?'selected':''}>${e.name}</option>`).join('')}
+      </select>
+    `:''}
   </div>`;
+
+  // ── Per-editor statistics panel, shown once a specific editor is selected ──
+  let editorStatsHtml = '';
+  if((me.role==='admin'||isMB) && tf.editorId && tf.editorId!=='all'){
+    const ed = APP.users[tf.editorId];
+    const edTasks = rangeT; // already scoped to this editor + current date range
+    const revisionsNotDone = edTasks.filter(t=>t.status==='in_revision' && (t.variants||[]).some(v=>v.mbResult==='needs_revision' && !v.revisionLink)).length;
+    const notReviewed = edTasks.filter(t=>t.status==='done' && taskOverallResult(t)==='pending').length;
+    const lateCount = edTasks.filter(t=>isLate(t)===true).length;
+    const approvedCount = edTasks.filter(t=>taskOverallResult(t)==='approved').length;
+    const winnersCount = edTasks.reduce((s,t)=>s+taskWinnerCount(t),0);
+    editorStatsHtml = `
+    <div class="card" style="margin-bottom:16px"><div class="card-b" style="padding:16px">
+      <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:12px">${av(ed?.id,20)} ${ed?.name||'Editor'} — stats for ${rangeLabel.toLowerCase()}</div>
+      <div class="kpis">
+        <div class="kpi"><div class="kpi-l">Total tasks</div><div class="kpi-v">${edTasks.length}</div></div>
+        <div class="kpi"><div class="kpi-l">Revisions not done</div><div class="kpi-v ${revisionsNotDone>0?'kpi-neg':''}">${revisionsNotDone}</div><div class="kpi-s">Sent back, not yet re-uploaded</div></div>
+        <div class="kpi"><div class="kpi-l">Tasks not reviewed</div><div class="kpi-v ${notReviewed>0?'kpi-neg':''}">${notReviewed}</div><div class="kpi-s">Uploaded, waiting on MB/admin</div></div>
+        <div class="kpi"><div class="kpi-l">Late uploads</div><div class="kpi-v ${lateCount>0?'kpi-neg':''}">${lateCount}</div></div>
+        <div class="kpi"><div class="kpi-l">Approved</div><div class="kpi-v kpi-pos">${approvedCount}</div></div>
+        <div class="kpi"><div class="kpi-l">Winning creatives</div><div class="kpi-v ${winnersCount>0?'kpi-pos':''}">${winnersCount}</div></div>
+      </div>
+    </div></div>`;
+  }
 
   return `
   ${filterBar}
@@ -1370,6 +1434,7 @@ function pgTasks(){
       ${isMB?`<button class="btn btn-pri btn-sm" onclick="openTaskCreate()">+ Assign Task</button>`:''}
     </div>
   </div>
+  ${editorStatsHtml}
   <div class="tabs">${tabs.map(t=>`<button class="tab ${APP.tab===t.id?'on':''}" onclick="APP.tab='${t.id}';render()">${t.l}</button>`).join('')}</div>
   <div class="card"><div class="tw"><table>
     <thead><tr><th>Product / Angle</th><th>Market</th><th>Campaign</th><th>Format</th><th>Voice</th><th>Editor</th><th>Status</th><th>Uploaded</th><th>Deadline</th><th>Feedback</th><th>Result</th><th></th></tr></thead>
@@ -3175,13 +3240,14 @@ function openTask(id){
 function variantCard(v,i,canVE,canMB,isA,t){
   const deadlineYMD=(t.deadlineDate||'').slice(0,10);
   // Late = uploaded on a day AFTER the deadline day (local date comparison)
-  const late = v.uploadedAt && deadlineYMD ? toYMD(new Date(v.uploadedAt)) > deadlineYMD : null;
-  const revLate = v.revisionUploadedAt && deadlineYMD ? toYMD(new Date(v.revisionUploadedAt)) > deadlineYMD : null;
+  const late = v.uploadedAt && deadlineYMD ? ymdMA(new Date(v.uploadedAt)) > deadlineYMD : null;
+  const revLate = v.revisionUploadedAt && deadlineYMD ? ymdMA(new Date(v.revisionUploadedAt)) > deadlineYMD : null;
   const inRevision = v.mbResult==='needs_revision';
   const isApproved = v.mbResult==='approved';
-  const borderColor = isApproved?'var(--ok-bd)':inRevision?'var(--warn-bd)':'var(--border)';
-  const headerBg   = isApproved?'var(--ok-bg)':inRevision?'var(--warn-bg)':'var(--s50)';
-  const statusLabel = isApproved?'&#10003; Approved':inRevision?'&#8634; Needs revision':v.videoLink?'Waiting for approval':'Pending upload';
+  const revisionDone = inRevision && !!v.revisionLink; // editor has re-uploaded; waiting on MB/admin to re-review
+  const borderColor = isApproved?'var(--ok-bd)':revisionDone?'var(--ok-bd)':inRevision?'var(--warn-bd)':'var(--border)';
+  const headerBg   = isApproved?'var(--ok-bg)':revisionDone?'var(--ok-bg)':inRevision?'var(--warn-bg)':'var(--s50)';
+  const statusLabel = isApproved?'&#10003; Approved':revisionDone?'&#10003; Revision done':inRevision?'&#8634; Needs revision':v.videoLink?'Waiting for approval':'Pending upload';
   const rmBtn = (canMB||isA)&&i>0 ? '<button class="btn btn-ghost btn-xs" onclick="removeVariant('+i+')">Remove</button>' : '';
   const uploadInfo = v.uploadedAt ? '<div style="font-size:11px;margin-top:5px;color:var(--muted)">Uploaded '+fmtDateTime(v.uploadedAt)+' '+(late===true?'<span class="late">&middot; Late</span>':late===false?'<span class="ontime">&middot; On time</span>':'')+'</div>' : '';
   const videoOpenLink = v.videoLink ? '<a href="'+v.videoLink+'" target="_blank" style="display:inline-block;margin-top:5px;font-size:11px;color:var(--accent)">Open video &#8599;</a>' : '';
@@ -3193,7 +3259,9 @@ function variantCard(v,i,canVE,canMB,isA,t){
     const revUnlockNote = canVE&&!isA&&v.revisionLink&&v.linksUnlocked ? '<div style="font-size:10px;color:var(--warn);margin-top:4px">🔓 Your media buyer unlocked this — you can edit it now</div>' : '';
     const revLockToggle = (canMB||isA)&&v.revisionLink ? '<button class="btn btn-ghost btn-xs" type="button" onclick="toggleVariantLock('+i+')" style="margin-left:8px;'+(v.linksUnlocked?'color:var(--warn)':'')+'">'+(v.linksUnlocked?'🔓 Unlocked':'🔒 Locked')+'</button>' : '';
     const veRevInput = canVE||isA ? '<label class="fl" style="color:var(--warn)">Upload revised video link'+revLockToggle+'</label><input class="fi" data-vfield="revisionLink" data-vidx="'+i+'" value="'+(v.revisionLink||'')+'" placeholder="https://drive.google.com/... (revised version)" '+((canVE&&!isA&&v.revisionLink&&!v.linksUnlocked)?'disabled':'')+'>'+revLockNote+revUnlockNote+revUploadInfo : '<div style="font-size:12px;color:var(--muted)">Waiting for editor to upload revised version.</div>';
-    revisionBlock = '<div style="padding:11px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-radius:8px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--warn);margin-bottom:4px">&#8634; Revision requested</div>'+feedbackDisplay+veRevInput+'</div>';
+    revisionBlock = revisionDone
+      ? '<div style="padding:11px;background:var(--ok-bg);border:1px solid var(--ok-bd);border-radius:8px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--ok);margin-bottom:4px">&#10003; Revision done — waiting for review</div>'+feedbackDisplay+veRevInput+'</div>'
+      : '<div style="padding:11px;background:var(--warn-bg);border:1px solid var(--warn-bd);border-radius:8px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--warn);margin-bottom:4px">&#8634; Revision requested</div>'+feedbackDisplay+veRevInput+'</div>';
   }
   const revisedLink = v.revisionLink&&!inRevision ? '<div style="padding:9px 12px;background:var(--ok-bg);border:1px solid var(--ok-bd);border-radius:8px;margin-bottom:10px;font-size:12px"><b>Revised:</b> <a href="'+v.revisionLink+'" target="_blank" style="color:var(--accent)">Open &#8599;</a></div>' : '';
   let reviewBlock = '';
