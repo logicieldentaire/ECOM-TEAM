@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>EcomTeamAfrica — Operations</title>
+<!-- PWA -->
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0F172A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="EcomTeam">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -54,7 +63,7 @@ html, body { height: 100%; font-family: 'Inter', system-ui, sans-serif; font-siz
 a { color: var(--accent); }
 
 /* ─── AUTH ─── */
-.auth { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--ink); }
+.auth { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; background: var(--ink); }
 .auth-card { background: #fff; border-radius: 16px; padding: 44px 40px; width: 100%; max-width: 400px; box-shadow: 0 20px 60px rgba(0,0,0,.3); }
 .auth-logo { display: flex; align-items: center; gap: 11px; justify-content: center; margin-bottom: 6px; }
 .auth-mark { width: 38px; height: 38px; border-radius: 9px; background: var(--ink); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 16px; }
@@ -69,7 +78,8 @@ a { color: var(--accent); }
 .auth-btn:hover { background: var(--accent-d); }
 
 /* ─── LAYOUT ─── */
-.app { display: flex; height: 100vh; overflow: hidden; }
+.app { display: flex; height: 100vh; height: 100dvh; overflow: hidden; }
+@media (display-mode: standalone){ body { overscroll-behavior-y: none; } .app { padding-bottom: env(safe-area-inset-bottom); } }
 
 /* ─── SIDEBAR ─── */
 .sb { width: var(--sw); min-width: var(--sw); background: var(--ink); display: flex; flex-direction: column; overflow: hidden; transition: width .2s, min-width .2s; }
@@ -1200,7 +1210,7 @@ function dashVE(veId){
             <td style="font-size:11px;color:var(--sub);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.angle.slice(0,48)}${t.angle.length>48?'…':''}</td>
             <td style="font-size:11px;color:var(--sub)">${t.videoType}</td>
             <td style="font-size:11px;color:var(--sub)">${t.voiceOver}</td>
-            <td>${statusChipForTask(t)}</td>
+            <td>${sChip(t.status)}</td>
             <td><button class="btn btn-out btn-xs" onclick="event.stopPropagation();openTask(${t.id})">Open</button></td>
           </tr>`;
         }).join('')}</tbody>
@@ -1364,7 +1374,7 @@ function pgTasks(){
         <td style="font-size:11px;color:var(--sub);max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.videoType}</td>
         <td style="font-size:11px;color:var(--sub);max-width:100px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.voiceOver}</td>
         <td>${av(t.assignedVE,24)}</td>
-        <td>${statusChipForTask(t)}</td>
+        <td>${sChip(t.status)}</td>
         <td style="white-space:nowrap">${upl?fmtDateTime(upl):'<span style="color:var(--muted)">—</span>'}</td>
         <td>${late===true?'<span class="late">Late</span>':late===false?'<span class="ontime">On time</span>':'<span style="color:var(--muted)">—</span>'}</td>
         <td>${taskHasFeedback(t)?chip('Feedback given','ok'):'<span style="color:var(--muted)">—</span>'}</td>
@@ -4516,6 +4526,12 @@ document.getElementById('mo2').addEventListener('click',function(e){ if(e.target
   document.getElementById('auth').style.display='';
   renderAuth();
 })();
+</script>
+<script>
+// PWA: register the service worker (installable app + offline fallback)
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{ navigator.serviceWorker.register('/sw.js').catch(()=>{}); });
+}
 </script>
 </body>
 </html>
